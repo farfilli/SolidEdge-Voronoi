@@ -9,7 +9,9 @@ A VB.net implementation of the [Bowyer–Watson algorithm](https://en.wikipedia.
 The result is a [Delaunay triangulation](https://en.wikipedia.org/wiki/Delaunay_triangulation) for a set of randomly generated points.
 Following the Delaunay triangulation, the dual [Voronoi diagram](https://en.wikipedia.org/wiki/Voronoi_diagram) is constructed.
 
-<img alt="Delaunay triangulation and Voronoi diagram for 5000 points" src="screenshots/delaunay_voronoi.png" width="700">
+<img alt="User interface" src="Images/UI.png" width="700">
+<img alt="Solid Edge sketch" src="Images/Sketch.png" width="700">
+<img alt="Rendering" src="Images/Render.png" width="700">
 
 ## License
 
