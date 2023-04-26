@@ -1,4 +1,5 @@
 ﻿
+Imports System.Reflection
 Imports System.Windows
 Imports System.Windows.Shapes
 Imports SolidEdge_Voronoi.DelaunayVoronoi
@@ -149,6 +150,12 @@ Public Class Form1
         For Each edge In voronoiEdges
             lines2d.AddBy2Points(CSng(edge.Point1.X / 1000), CSng(edge.Point1.Y / 1000), CSng(edge.Point2.X / 1000), CSng(edge.Point2.Y / 1000))
         Next
+
+    End Sub
+
+    Private Sub Form1_Load(sender As Object, e As EventArgs) Handles Me.Load
+
+        Me.Text += " - Version " & Assembly.GetExecutingAssembly().GetName().Version.Major & "." & Assembly.GetExecutingAssembly().GetName().Version.Minor
 
     End Sub
 
