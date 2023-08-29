@@ -13,6 +13,8 @@ Following the Delaunay triangulation, the dual [Voronoi diagram](https://en.wiki
 <img alt="Solid Edge sketch" src="Images/Sketch.png" width="700">
 <img alt="Rendering" src="Images/Render.png" width="700">
 
+Releases here: https://github.com/farfilli/SolidEdge-Voronoi/releases
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE.txt](LICENSE.txt) file for details
