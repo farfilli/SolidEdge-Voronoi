@@ -3,6 +3,9 @@ Voronoi diagram generator to Solid Edge sketch
 
 Part of the code is adapted from https://github.com/RafaelKuebler/DelaunayVoronoi
 
+# New release with relaxation and usage of the csDelaunay library
+https://github.com/jfg8/csDelaunay
+
 # VB.net Delaunay triangulation + Voronoi Diagram
 
 A VB.net implementation of the [Bowyer–Watson algorithm](https://en.wikipedia.org/wiki/Bowyer%E2%80%93Watson_algorithm).
@@ -10,6 +13,11 @@ The result is a [Delaunay triangulation](https://en.wikipedia.org/wiki/Delaunay_
 Following the Delaunay triangulation, the dual [Voronoi diagram](https://en.wikipedia.org/wiki/Voronoi_diagram) is constructed.
 
 <img alt="User interface" src="Images/UI.png" width="700">
+
+<img alt="Relax 1" src="Images/relax1.png" width="700">
+<img alt="Relax 2" src="Images/relax2.png" width="700">
+<img alt="Relax 3" src="Images/relax20.png" width="700">
+
 <img alt="Solid Edge sketch" src="Images/Sketch.png" width="700">
 <img alt="Rendering" src="Images/Render.png" width="700">
 
