@@ -220,6 +220,7 @@ Public Class Form1
 
                 Dim tmpBounds As Rectf = New Rectf(0, 0, DiagramWidth, DiagramHeight)
                 CSVoronoi = New csDelaunay.Voronoi(tmpPoints, tmpBounds, CInt(TB_Relaxation.Text))
+
                 Repaint()
 
             End If
