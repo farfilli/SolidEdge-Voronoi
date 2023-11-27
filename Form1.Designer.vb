@@ -30,6 +30,8 @@ Partial Class Form1
         Me.CB_Triangles = New System.Windows.Forms.CheckBox()
         Me.CB_Voronoi = New System.Windows.Forms.CheckBox()
         Me.BT_DrawInEdge = New System.Windows.Forms.Button()
+        Me.TB_Relaxation = New System.Windows.Forms.TextBox()
+        Me.CB_Circles = New System.Windows.Forms.CheckBox()
         Me.SuspendLayout()
         '
         'Label1
@@ -45,15 +47,16 @@ Partial Class Form1
         '
         Me.TB_Points.Location = New System.Drawing.Point(54, 6)
         Me.TB_Points.Name = "TB_Points"
-        Me.TB_Points.Size = New System.Drawing.Size(113, 22)
+        Me.TB_Points.Size = New System.Drawing.Size(60, 22)
         Me.TB_Points.TabIndex = 2
         Me.TB_Points.Text = "200"
+        Me.TB_Points.TextAlign = System.Windows.Forms.HorizontalAlignment.Center
         '
         'Button1
         '
-        Me.Button1.Location = New System.Drawing.Point(173, 6)
+        Me.Button1.Location = New System.Drawing.Point(186, 6)
         Me.Button1.Name = "Button1"
-        Me.Button1.Size = New System.Drawing.Size(68, 22)
+        Me.Button1.Size = New System.Drawing.Size(60, 22)
         Me.Button1.TabIndex = 3
         Me.Button1.Text = "Draw"
         Me.Button1.UseVisualStyleBackColor = True
@@ -83,7 +86,7 @@ Partial Class Form1
         Me.CB_Voronoi.AutoSize = True
         Me.CB_Voronoi.Checked = True
         Me.CB_Voronoi.CheckState = System.Windows.Forms.CheckState.Checked
-        Me.CB_Voronoi.Location = New System.Drawing.Point(15, 77)
+        Me.CB_Voronoi.Location = New System.Drawing.Point(15, 100)
         Me.CB_Voronoi.Name = "CB_Voronoi"
         Me.CB_Voronoi.Size = New System.Drawing.Size(67, 17)
         Me.CB_Voronoi.TabIndex = 4
@@ -92,23 +95,44 @@ Partial Class Form1
         '
         'BT_DrawInEdge
         '
-        Me.BT_DrawInEdge.Location = New System.Drawing.Point(247, 6)
+        Me.BT_DrawInEdge.Location = New System.Drawing.Point(252, 6)
         Me.BT_DrawInEdge.Name = "BT_DrawInEdge"
-        Me.BT_DrawInEdge.Size = New System.Drawing.Size(81, 22)
+        Me.BT_DrawInEdge.Size = New System.Drawing.Size(70, 22)
         Me.BT_DrawInEdge.TabIndex = 3
         Me.BT_DrawInEdge.Text = "Draw in SE"
         Me.BT_DrawInEdge.UseVisualStyleBackColor = True
+        '
+        'TB_Relaxation
+        '
+        Me.TB_Relaxation.Location = New System.Drawing.Point(120, 6)
+        Me.TB_Relaxation.Name = "TB_Relaxation"
+        Me.TB_Relaxation.Size = New System.Drawing.Size(60, 22)
+        Me.TB_Relaxation.TabIndex = 2
+        Me.TB_Relaxation.Text = "0"
+        Me.TB_Relaxation.TextAlign = System.Windows.Forms.HorizontalAlignment.Center
+        '
+        'CB_Circles
+        '
+        Me.CB_Circles.AutoSize = True
+        Me.CB_Circles.Location = New System.Drawing.Point(15, 77)
+        Me.CB_Circles.Name = "CB_Circles"
+        Me.CB_Circles.Size = New System.Drawing.Size(59, 17)
+        Me.CB_Circles.TabIndex = 4
+        Me.CB_Circles.Text = "Circles"
+        Me.CB_Circles.UseVisualStyleBackColor = True
         '
         'Form1
         '
         Me.AutoScaleDimensions = New System.Drawing.SizeF(6.0!, 13.0!)
         Me.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font
         Me.ClientSize = New System.Drawing.Size(800, 450)
+        Me.Controls.Add(Me.CB_Circles)
         Me.Controls.Add(Me.CB_Voronoi)
         Me.Controls.Add(Me.CB_Triangles)
         Me.Controls.Add(Me.CB_Points)
         Me.Controls.Add(Me.BT_DrawInEdge)
         Me.Controls.Add(Me.Button1)
+        Me.Controls.Add(Me.TB_Relaxation)
         Me.Controls.Add(Me.TB_Points)
         Me.Controls.Add(Me.Label1)
         Me.Font = New System.Drawing.Font("Segoe UI", 8.25!, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
@@ -126,4 +150,6 @@ Partial Class Form1
     Friend WithEvents CB_Triangles As CheckBox
     Friend WithEvents CB_Voronoi As CheckBox
     Friend WithEvents BT_DrawInEdge As Button
+    Friend WithEvents TB_Relaxation As TextBox
+    Friend WithEvents CB_Circles As CheckBox
 End Class
