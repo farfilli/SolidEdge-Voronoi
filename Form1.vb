@@ -1,6 +1,7 @@
 ﻿
 Imports System.Reflection
 Imports System.Windows
+Imports System.Windows.Forms.VisualStyles.VisualStyleElement.Rebar
 Imports System.Windows.Shapes
 Imports csDelaunay
 Imports SolidEdge_Voronoi.DelaunayVoronoi
@@ -12,11 +13,12 @@ Public Class Form1
     Dim PointCount As Int16
     Dim surface As Graphics = CreateGraphics()
 
-    Dim points As IEnumerable(Of DelaunayVoronoi.Point)
+    Dim points As List(Of DelaunayVoronoi.Point)
     Dim triangulation As IEnumerable(Of DelaunayVoronoi.Triangle)
     Dim voronoiEdges As IEnumerable(Of DelaunayVoronoi.Edge)
 
     Dim CSVoronoi As csDelaunay.Voronoi
+
 
     Private Sub Form1_Resize(sender As Object, e As EventArgs) Handles Me.Resize
 
@@ -39,6 +41,8 @@ Public Class Form1
     Private Sub GenerateAndDraw()
 
         points = delaunay.GeneratePoints(PointCount, DiagramWidth, DiagramHeight)
+        'generate_random_points(PointCount, DiagramWidth, DiagramHeight)
+
         triangulation = delaunay.BowyerWatson(points)
         voronoiEdges = voronoi.GenerateEdgesFromDelaunay(triangulation)
 
@@ -191,8 +195,8 @@ Public Class Form1
         Dim objSketch = objPar.ActiveSketch
         Dim lines2d As SolidEdgeFrameworkSupport.Lines2d = objSketch.Lines2d
 
-        For Each edge In voronoiEdges
-            lines2d.AddBy2Points(CSng(edge.Point1.X / 1000), CSng(edge.Point1.Y / 1000), CSng(edge.Point2.X / 1000), CSng(edge.Point2.Y / 1000))
+        For Each edge In CSVoronoi.Edges 'voronoiEdges
+            If Not IsNothing(edge.RightVertex) And Not IsNothing(edge.LeftVertex) Then lines2d.AddBy2Points(CSng(edge.RightVertex.x / 1000), CSng(edge.RightVertex.y / 1000), CSng(edge.LeftVertex.x / 1000), CSng(edge.LeftVertex.y / 1000))
         Next
 
     End Sub
@@ -238,5 +242,35 @@ Public Class Form1
         End If
 
     End Sub
+
+
+    Public Sub generate_random_points(ByVal inpt_point_count As Integer, ByVal x_coord_limit As Integer, ByVal y_coord_limit As Integer)
+        'delaunay_triangle = New Planar_object_store()
+        Dim temp_pt_list As List(Of Numerics.Vector2) = New List(Of Numerics.Vector2)()
+        Dim point_count As Integer = inpt_point_count
+
+        Dim rand0 As Random = New Random()
+
+        Do
+
+            For i As Integer = 0 To point_count - 1
+                Dim temp_pt As Numerics.Vector2
+                Dim rand_pt As PointF = New PointF(rand0.[Next](-x_coord_limit, x_coord_limit), rand0.[Next](-y_coord_limit, y_coord_limit))
+                temp_pt = New Numerics.Vector2(rand_pt.X, rand_pt.Y)
+                temp_pt_list.Add(temp_pt)
+            Next
+
+            'temp_pt_list = temp_pt_list.Distinct(New Planar_object_store.points_equality_comparer()).ToList()
+            point_count = inpt_point_count - temp_pt_list.Count
+        Loop While point_count <> 0
+
+        For Each tmpPoint In temp_pt_list
+            Dim tmpDela As DelaunayVoronoi.Point = New DelaunayVoronoi.Point(tmpPoint.X, tmpPoint.Y)
+            points.Add(tmpDela)
+        Next
+
+        'delaunay_triangle.delaunay_points = temp_pt_list
+    End Sub
+
 
 End Class
