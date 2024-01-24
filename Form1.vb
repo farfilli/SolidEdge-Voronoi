@@ -186,13 +186,55 @@ Public Class Form1
 
     Private Sub BT_DrawInEdge_Click(sender As Object, e As EventArgs) Handles BT_DrawInEdge.Click
 
-        Dim objApp As SolidEdgeFramework.Application = GetObject(, "SolidEdge.Application")
-        Dim objPar As SolidEdgePart.PartDocument = objApp.ActiveDocument
+        Dim objApp As SolidEdgeFramework.Application
 
-        Dim refPlanes As SolidEdgePart.RefPlanes = objPar.RefPlanes
-        Dim refPlane As SolidEdgePart.RefPlane = refPlanes.Item(1)
+        Try
+            objApp = GetObject(, "SolidEdge.Application")
+        Catch ex As Exception
+            MsgBox("Solid Edge must be running!", MsgBoxStyle.Exclamation, "Solid Edge Voronoi")
+            Exit Sub
+        End Try
 
-        Dim objSketch = objPar.ActiveSketch
+        Dim objPar As SolidEdgePart.PartDocument = Nothing
+        Dim objPsm As SolidEdgePart.SheetMetalDocument = Nothing
+        Dim objSketch As Object = Nothing
+
+        If objApp.Documents.Count = 0 Then
+            MsgBox("Ordered Part or Sheetmetal should be open!", MsgBoxStyle.Exclamation, "Solid Edge Voronoi")
+            Exit Sub
+        End If
+
+        Select Case objApp.ActiveDocumentType
+            Case = SolidEdgeFramework.DocumentTypeConstants.igPartDocument
+                objPar = objApp.ActiveDocument
+            Case = SolidEdgeFramework.DocumentTypeConstants.igSheetMetalDocument
+                objPsm = objApp.ActiveDocument
+            Case Else
+                MsgBox("Ordered Part or Sheetmetal should be open!", MsgBoxStyle.Exclamation, "Solid Edge Voronoi")
+                Exit Sub
+        End Select
+
+        Select Case objApp.ActiveDocumentType
+            Case = SolidEdgeFramework.DocumentTypeConstants.igPartDocument
+                If objPar.ActiveSketch Is Nothing Then
+                    MsgBox("A sketch must be active!", MsgBoxStyle.Exclamation, "Solid Edge Voronoi")
+                    Exit Sub
+                End If
+                objSketch = objPar.ActiveSketch
+
+            Case = SolidEdgeFramework.DocumentTypeConstants.igSheetMetalDocument
+                If objPsm.ActiveSketch Is Nothing Then
+                    MsgBox("A sketch must be active!", MsgBoxStyle.Exclamation, "Solid Edge Voronoi")
+                    Exit Sub
+                End If
+                objSketch = objPsm.ActiveSketch
+
+        End Select
+
+
+        'Dim refPlanes As SolidEdgePart.RefPlanes = objPar.RefPlanes
+        'Dim refPlane As SolidEdgePart.RefPlane = refPlanes.Item(1)
+
         Dim lines2d As SolidEdgeFrameworkSupport.Lines2d = objSketch.Lines2d
 
         For Each edge In CSVoronoi.Edges 'voronoiEdges
