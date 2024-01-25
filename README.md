@@ -13,8 +13,8 @@ The result is a [Delaunay triangulation](https://en.wikipedia.org/wiki/Delaunay_
 Following the Delaunay triangulation, the dual [Voronoi diagram](https://en.wikipedia.org/wiki/Voronoi_diagram) is constructed.
 
 # Installation
-
-The application is standalone, just unzip the archive in a folder of your choice.
+Releases here: https://github.com/farfilli/SolidEdge-Voronoi/releases
+The application is standalone, just unzip the release archive in a folder of your choice.
 You can personalize Solid Edge UI to add a button that starts the Voronoi generator application; [How to add a button in Solid Edge UI](https://community.sw.siemens.com/s/question/0D54O000061xsT3SAI/how-can-i-create-a-new-button-in-solidedge-toolbar-and-run-my-vbnet-code-from-it-)
 
 # UI description
@@ -40,8 +40,6 @@ You can personalize Solid Edge UI to add a button that starts the Voronoi genera
 
 <img alt="Solid Edge sketch" src="Images/Sketch.png" width="700">
 <img alt="Rendering" src="Images/Render.png" width="700">
-
-Releases here: https://github.com/farfilli/SolidEdge-Voronoi/releases
 
 ## License
 
