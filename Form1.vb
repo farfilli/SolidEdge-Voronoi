@@ -1,5 +1,6 @@
 ﻿
 Imports System.Reflection
+Imports System.Text.RegularExpressions
 Imports System.Windows
 Imports System.Windows.Forms.VisualStyles.VisualStyleElement.Rebar
 Imports System.Windows.Shapes
@@ -120,6 +121,12 @@ Public Class Form1
     End Sub
 
     Private Sub TB_Points_TextChanged(sender As Object, e As EventArgs) Handles TB_Points.TextChanged
+
+        Dim digitsOnly As Regex = New Regex("[^\d]")
+        TB_Points.Text = digitsOnly.Replace(TB_Points.Text, "")
+
+        If TB_Points.Text = "" Then TB_Points.Text = "1"
+
         PointCount = CInt(TB_Points.Text)
     End Sub
 
@@ -250,6 +257,11 @@ Public Class Form1
     End Sub
 
     Private Sub TB_Relaxation_TextChanged(sender As Object, e As EventArgs) Handles TB_Relaxation.TextChanged
+
+        Dim digitsOnly As Regex = New Regex("[^\d]")
+        TB_Relaxation.Text = digitsOnly.Replace(TB_Relaxation.Text, "")
+
+        If TB_Relaxation.Text = "" Then TB_Relaxation.Text = "0"
 
         If Not IsNothing(points) And Not IsNothing(TB_Relaxation.Text) Then
 
