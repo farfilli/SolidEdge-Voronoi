@@ -14,6 +14,7 @@ Following the Delaunay triangulation, the dual [Voronoi diagram](https://en.wiki
 
 # Installation
 Releases here: https://github.com/farfilli/SolidEdge-Voronoi/releases
+
 The application is standalone, just unzip the release archive in a folder of your choice.
 You can personalize Solid Edge UI to add a button that starts the Voronoi generator application; [How to add a button in Solid Edge UI](https://community.sw.siemens.com/s/question/0D54O000061xsT3SAI/how-can-i-create-a-new-button-in-solidedge-toolbar-and-run-my-vbnet-code-from-it-)
 
