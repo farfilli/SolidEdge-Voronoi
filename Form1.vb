@@ -20,6 +20,12 @@ Public Class Form1
 
     Dim CSVoronoi As csDelaunay.Voronoi
 
+    Private Sub Form1_Load(sender As Object, e As EventArgs) Handles Me.Load
+
+        'Update assembly information before release
+        Me.Text += " - Version " & Assembly.GetExecutingAssembly().GetName().Version.Major & "." & Assembly.GetExecutingAssembly().GetName().Version.Minor
+
+    End Sub
 
     Private Sub Form1_Resize(sender As Object, e As EventArgs) Handles Me.Resize
 
@@ -244,15 +250,13 @@ Public Class Form1
 
         Dim lines2d As SolidEdgeFrameworkSupport.Lines2d = objSketch.Lines2d
 
+        objApp.ScreenUpdating = False
+
         For Each edge In CSVoronoi.Edges 'voronoiEdges
             If Not IsNothing(edge.RightVertex) And Not IsNothing(edge.LeftVertex) Then lines2d.AddBy2Points(CSng(edge.RightVertex.x / 1000), CSng(edge.RightVertex.y / 1000), CSng(edge.LeftVertex.x / 1000), CSng(edge.LeftVertex.y / 1000))
         Next
 
-    End Sub
-
-    Private Sub Form1_Load(sender As Object, e As EventArgs) Handles Me.Load
-
-        Me.Text += " - Version " & Assembly.GetExecutingAssembly().GetName().Version.Major & "." & Assembly.GetExecutingAssembly().GetName().Version.Minor
+        objApp.ScreenUpdating = True
 
     End Sub
 
