@@ -94,8 +94,9 @@ Public Module ExportGeometry
             If cell Is Nothing OrElse cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Continue For
 
             Dim p As ExportPath2D = Nothing
+            Dim effectiveStyle As CellRenderStyle = GetEffectiveRenderStyle(canvas, cell)
 
-            Select Case canvas.RenderStyle
+            Select Case effectiveStyle
                 Case CellRenderStyle.Straight
                     p = BuildStraightCellPath(cell)
 
@@ -583,5 +584,41 @@ Public Module ExportGeometry
         q1 = p1 + inward * offset
         q2 = p2 + inward * offset
     End Sub
+
+    Private Function GetEffectiveRenderStyle(canvas As VoronoiCanvas, cell As VoronoiCell) As CellRenderStyle
+        If canvas.RenderStyle <> CellRenderStyle.Random Then Return canvas.RenderStyle
+        Return GetStableRandomSymbolStyle(cell)
+    End Function
+
+    Private Function GetStableRandomSymbolStyle(cell As VoronoiCell) As CellRenderStyle
+        Dim styles As CellRenderStyle() = {
+            CellRenderStyle.Circle,
+            CellRenderStyle.Square,
+            CellRenderStyle.RoundedSquare,
+            CellRenderStyle.Triangle,
+            CellRenderStyle.Pentagon,
+            CellRenderStyle.Hexagon,
+            CellRenderStyle.Octagon,
+            CellRenderStyle.Star,
+            CellRenderStyle.Star3,
+            CellRenderStyle.Star4
+        }
+
+        Dim idx As Integer = GetStableStyleIndex(cell.Seed, styles.Length)
+        Return styles(idx)
+    End Function
+
+    Private Function GetStableStyleIndex(seed As Vec2, count As Integer) As Integer
+        If count <= 0 Then Return 0
+
+        Dim v As Double = Math.Abs(seed.X * 91.173 + seed.Y * 167.413)
+        Dim frac As Double = v - Math.Floor(v)
+        Dim idx As Integer = CInt(Math.Floor(frac * count))
+
+        If idx < 0 Then idx = 0
+        If idx >= count Then idx = count - 1
+
+        Return idx
+    End Function
 
 End Module

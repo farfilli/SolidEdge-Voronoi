@@ -7,6 +7,7 @@ Imports System.Windows.Forms
 Public Enum CellRenderStyle
     Straight
     Curved
+    Random
     Circle
     Square
     RoundedSquare
@@ -194,7 +195,9 @@ Public Class VoronoiCanvas
                     End Using
                 End If
 
-                Select Case RenderStyle
+                Dim effectiveStyle As CellRenderStyle = GetEffectiveRenderStyle(cell)
+
+                Select Case effectiveStyle
                     Case CellRenderStyle.Straight
                         If ShowOuterEdges Then
                             g.DrawPolygon(outerPen, outerPts)
@@ -223,7 +226,7 @@ Public Class VoronoiCanvas
                             g.DrawPolygon(Pens.DimGray, outerPts)
                         End If
 
-                        Using path As GraphicsPath = BuildSymbolPath(cell, view, RenderStyle, CellScale, RandomRotation)
+                        Using path As GraphicsPath = BuildSymbolPath(cell, view, effectiveStyle, CellScale, RandomRotation)
                             If path IsNot Nothing Then
                                 Using symbolPen As New Pen(GetCellColor(i, 240), InnerCurveWidth)
                                     symbolPen.LineJoin = LineJoin.Round
@@ -898,4 +901,41 @@ Public Class VoronoiCanvas
         RaiseEvent SeedsEdited(Me, EventArgs.Empty)
         Invalidate()
     End Sub
+
+    Private Function GetEffectiveRenderStyle(cell As VoronoiCell) As CellRenderStyle
+        If RenderStyle <> CellRenderStyle.Random Then Return RenderStyle
+        Return GetStableRandomSymbolStyle(cell)
+    End Function
+
+    Private Function GetStableRandomSymbolStyle(cell As VoronoiCell) As CellRenderStyle
+        Dim styles As CellRenderStyle() = {
+            CellRenderStyle.Circle,
+            CellRenderStyle.Square,
+            CellRenderStyle.RoundedSquare,
+            CellRenderStyle.Triangle,
+            CellRenderStyle.Pentagon,
+            CellRenderStyle.Hexagon,
+            CellRenderStyle.Octagon,
+            CellRenderStyle.Star,
+            CellRenderStyle.Star3,
+            CellRenderStyle.Star4
+        }
+
+        Dim idx As Integer = GetStableStyleIndex(cell.Seed, styles.Length)
+        Return styles(idx)
+    End Function
+
+    Private Function GetStableStyleIndex(seed As Vec2, count As Integer) As Integer
+        If count <= 0 Then Return 0
+
+        Dim v As Double = Math.Abs(seed.X * 91.173 + seed.Y * 167.413)
+        Dim frac As Double = v - Math.Floor(v)
+        Dim idx As Integer = CInt(Math.Floor(frac * count))
+
+        If idx < 0 Then idx = 0
+        If idx >= count Then idx = count - 1
+
+        Return idx
+    End Function
+
 End Class
