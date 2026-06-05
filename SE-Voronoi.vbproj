@@ -138,34 +138,5 @@
   <ItemGroup>
     <Content Include="SE-Voronoi.ico" />
   </ItemGroup>
-  <ItemGroup>
-    <COMReference Include="SolidEdgeConstants">
-      <Guid>{C467A6F5-27ED-11D2-BE30-080036B4D502}</Guid>
-      <VersionMajor>1</VersionMajor>
-      <VersionMinor>0</VersionMinor>
-      <Lcid>0</Lcid>
-      <WrapperTool>tlbimp</WrapperTool>
-      <Isolated>False</Isolated>
-      <EmbedInteropTypes>True</EmbedInteropTypes>
-    </COMReference>
-    <COMReference Include="SolidEdgeFramework">
-      <Guid>{8A7EFA3A-F000-11D1-BDFC-080036B4D502}</Guid>
-      <VersionMajor>1</VersionMajor>
-      <VersionMinor>0</VersionMinor>
-      <Lcid>0</Lcid>
-      <WrapperTool>tlbimp</WrapperTool>
-      <Isolated>False</Isolated>
-      <EmbedInteropTypes>True</EmbedInteropTypes>
-    </COMReference>
-    <COMReference Include="SolidEdgeFrameworkSupport">
-      <Guid>{943AC5C6-F4DB-11D1-BE00-080036B4D502}</Guid>
-      <VersionMajor>1</VersionMajor>
-      <VersionMinor>0</VersionMinor>
-      <Lcid>0</Lcid>
-      <WrapperTool>tlbimp</WrapperTool>
-      <Isolated>False</Isolated>
-      <EmbedInteropTypes>True</EmbedInteropTypes>
-    </COMReference>
-  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.VisualBasic.targets" />
 </Project>

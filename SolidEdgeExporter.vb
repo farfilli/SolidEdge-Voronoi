@@ -91,11 +91,11 @@ Public Module SolidEdgeExporter
                     Dim xm As Double = Nothing
                     Dim ym As Double = Nothing
                     Dim zm As Double = Nothing
-                    Dim KeyPointType As SolidEdgeConstants.KeyPointType = SolidEdgeConstants.KeyPointType.igKeyPointMiddle
-                    Dim HandleType As SolidEdgeConstants.HandleType = Nothing
-                    Dim arc2d As Arc2d = arc
+                    'Dim KeyPointType As SolidEdgeConstants.KeyPointType = SolidEdgeConstants.KeyPointType.igKeyPointMiddle
+                    'Dim HandleType As SolidEdgeConstants.HandleType = Nothing
+                    'Dim arc2d As Arc2d = arc
 
-                    arc2d.GetKeyPoint(1, xm, ym, zm, KeyPointType, HandleType)
+                    arc.GetKeyPoint(3, xm, ym, zm, 32, Nothing)
 
                     Dim center As New Vec2(xc * 1000.0, -yc * 1000.0)
                     Dim startPt As New Vec2(x1 * 1000.0, -y1 * 1000.0)
