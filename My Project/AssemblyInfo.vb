@@ -2,34 +2,31 @@
 Imports System.Reflection
 Imports System.Runtime.InteropServices
 
-' Le informazioni generali relative a un assembly sono controllate dal seguente 
-' set di attributi. Modificare i valori di questi attributi per modificare le informazioni
-' associate a un assembly.
+' General Information about an assembly is controlled through the following
+' set of attributes. Change these attribute values to modify the information
+' associated with an assembly.
 
-' Controllare i valori degli attributi degli assembly
+' Review the values of the assembly attributes
 
-<Assembly: AssemblyTitle("SolidEdge Voronoi")>
+<Assembly: AssemblyTitle("SE-Voronoi")>
 <Assembly: AssemblyDescription("")>
 <Assembly: AssemblyCompany("")>
-<Assembly: AssemblyProduct("SolidEdge Voronoi")>
-<Assembly: AssemblyCopyright("Copyright ©  2023")>
+<Assembly: AssemblyProduct("SE-Voronoi")>
+<Assembly: AssemblyCopyright("Copyright ©  2026")>
 <Assembly: AssemblyTrademark("")>
 
 <Assembly: ComVisible(False)>
 
-'Se il progetto viene esposto a COM, il GUID seguente verrà usato come ID del typelib
-<Assembly: Guid("63d15c99-8627-48c4-be7b-5c786c6a3b3e")>
+'The following GUID is for the ID of the typelib if this project is exposed to COM
+<Assembly: Guid("c4fb22d9-b95f-4d52-be32-079b9c2fdd80")>
 
-' Le informazioni sulla versione di un assembly sono costituite dai seguenti quattro valori:
+' Version information for an assembly consists of the following four values:
 '
-'      Versione principale
-'      Versione secondaria
-'      Numero di build
-'      Revisione
+'      Major Version
+'      Minor Version
+'      Build Number
+'      Revision
 '
-' È possibile specificare tutti i valori oppure impostare valori predefiniti per i numeri relativi alla revisione e alla build
-' usando l'asterisco '*' come illustrato di seguito:
-' <Assembly: AssemblyVersion("1.0.*")>
 
-<Assembly: AssemblyVersion("0.5")>
-<Assembly: AssemblyFileVersion("0.5")>
+<Assembly: AssemblyVersion("1.0.0.0")>
+<Assembly: AssemblyFileVersion("1.0.0.0")>

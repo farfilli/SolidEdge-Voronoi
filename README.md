@@ -1,53 +1,114 @@
-# SolidEdge-Voronoi
-Voronoi diagram generator to Solid Edge sketch
+\# Voronoi Editor for Solid Edge
 
-Part of the code is adapted from https://github.com/RafaelKuebler/DelaunayVoronoi
 
-# New release with relaxation and usage of the csDelaunay library
-https://github.com/jfg8/csDelaunay
 
-# VB.net Delaunay triangulation + Voronoi Diagram
+A WinForms VB.NET application for generating, editing, previewing, and exporting Voronoi-based geometric patterns. The program supports standard rectangular domains as well as closed sketch profiles read from Solid Edge, including regions with internal holes.\[1]\[2]
 
-A VB.net implementation of the [Bowyer–Watson algorithm](https://en.wikipedia.org/wiki/Bowyer%E2%80%93Watson_algorithm).
-The result is a [Delaunay triangulation](https://en.wikipedia.org/wiki/Delaunay_triangulation) for a set of randomly generated points.
-Following the Delaunay triangulation, the dual [Voronoi diagram](https://en.wikipedia.org/wiki/Voronoi_diagram) is constructed.
 
-# Installation
-Releases here: https://github.com/farfilli/SolidEdge-Voronoi/releases
 
-The application is standalone, just unzip the release archive in a folder of your choice.
-You can personalize Solid Edge UI to add a button that starts the Voronoi generator application; [How to add a button in Solid Edge UI](https://community.sw.siemens.com/s/question/0D54O000061xsT3SAI/how-can-i-create-a-new-button-in-solidedge-toolbar-and-run-my-vbnet-code-from-it-)
+\## Overview
 
-# UI description
 
-- The first textbox beside the Point label is the number of points; if you change this value you need to re-generate the Voronoi diagram
-- The second textbox is the number of relaxations to perform; if you change this value the Voronoi diagram is automatically regenerated
-- Draw button is used to random choose points and generate a new Voronoi diagram
-- Draw in SE button is used to transfer the current Voronoi diagram in Solid Edge active sketch
-- Points, Triangulation, Circles, and Voronoi options are to choose what to draw in the application, changing them will refresh the view
 
-# Usage
+The application builds Voronoi cells from editable seed points and renders them in several visual styles, including straight cells, curved cells, regular polygons, circles, and star-based symbols.\[1]\[3] It can export the visible geometry to SVG, DXF, or directly into the active Solid Edge sketch, using a shared export pipeline based on lines, arcs, and cubic Bezier segments.\[1]\[4]
 
-- Start the application and generate a Voronoi diagram by the button "Draw"
-- Open Solid Edge and open or create an Ordered Part or an Ordered SheetMetal
-- Create or edit a Sketch
-- While in the sketch use the "Draw in SE" button to transfer the current Voronoi diagram to Solid Edge
 
-<img alt="User interface" src="Images/UI.png" width="700">
 
-<img alt="Relax 1" src="Images/relax1.png" width="700">
-<img alt="Relax 2" src="Images/relax2.png" width="700">
-<img alt="Relax 3" src="Images/relax20.png" width="700">
+\## Main Features
 
-<img alt="Solid Edge sketch" src="Images/Sketch.png" width="700">
-<img alt="Rendering" src="Images/Render.png" width="700">
 
-## License
 
-This project is licensed under the MIT License - see the [LICENSE.txt](LICENSE.txt) file for details
+\- Generate Voronoi diagrams from a standard rectangular working area.\[1]
 
-## Acknowledgments
+\- Read closed boundary loops from the active Solid Edge sketch and use them as generation domains.\[2]
 
-* [Procedural Dungeon Generation Algorithm](https://www.gamasutra.com/blogs/AAdonaac/20150903/252889/Procedural_Dungeon_Generation_Algorithm.php)
-* [Polygonal Map Generation for Games](http://www-cs-students.stanford.edu/~amitp/game-programming/polygon-map-generation/)
-* [Check if point is in circumcircle of a triangle (TitohuanT's answer)](https://stackoverflow.com/questions/39984709/how-can-i-check-wether-a-point-is-inside-the-circumcircle-of-3-points)
+\- Support multiple sketch regions and hole loops inside outer boundaries.\[1]\[2]
+
+\- Edit seed points interactively on the canvas and rebuild cells after changes.\[1]\[3]
+
+\- Render cells as straight edges, curved inner paths, circles, polygons, and star symbols such as Star, Star3, and Star4.\[3]\[4]
+
+\- Export generated geometry to SVG, DXF, or directly back to Solid Edge.\[1]\[4]
+
+
+
+\## Workflow
+
+
+
+1\. Open the application.
+
+2\. Generate a random Voronoi layout or read the active Solid Edge sketch profile.\[1]\[2]
+
+3\. Adjust cell count, random seed, relaxation count, scaling, corner trimming, offsets, and symbol options from the sidebar controls.\[1]
+
+4\. Drag seed points on the canvas to refine the layout visually.\[1]\[3]
+
+5\. Export the resulting geometry to SVG, DXF, or the active Solid Edge part sketch.\[1]\[4]
+
+
+
+\## Rendering Modes
+
+
+
+The canvas supports different visualization modes through the `CellRenderStyle` enumeration, including Straight, Curved, Circle, Square, RoundedSquare, Triangle, Pentagon, Hexagon, Octagon, Star, Star3, and Star4.\[3] Corner behavior can also be controlled independently for inner curves and symbol outlines, with sharp, Bezier, or fillet-arc style handling depending on the selected mode.\[3]\[4]
+
+
+
+\## Solid Edge Integration
+
+
+
+When a sketch is active in Solid Edge, the application can read lines, arcs, and circles from that sketch, reconstruct closed loops, classify outer boundaries and holes, and convert them into generation regions.\[2] The imported geometry is transformed into the application coordinate system and used both for visualization and constrained Voronoi generation inside the detected sketch domains.\[1]\[2]
+
+
+
+\## Export System
+
+
+
+The export layer converts the rendered result into reusable geometric paths composed of line, arc, and cubic Bezier segments.\[4] This allows the same generated pattern to be written consistently to SVG, DXF, and Solid Edge while preserving the selected visual style as closely as possible.\[1]\[4]
+
+
+
+\## Project Structure
+
+
+
+Typical source files in the project include:
+
+
+
+\- `MainForm.vb` — main UI, command flow, sketch import, and export actions.\[1]
+
+\- `VoronoiCanvas.vb` — drawing surface, rendering logic, and seed editing behavior.\[3]
+
+\- `VoronoiEngine.vb` — seed creation, cell construction, and relaxation logic.\[5]
+
+\- `Geometry.vb` — geometric utility functions used across the project.\[6]
+
+\- `SolidEdgeExporter.vb` — Solid Edge interoperability for sketch reading and sketch export.\[2]
+
+\- `ExportGeometry.vb` — conversion of rendered cells into exportable geometric paths.\[4]
+
+
+
+\## Requirements
+
+
+
+\- Windows with .NET / VB.NET WinForms support.\[1]
+
+\- Solid Edge installed and running for sketch import or direct sketch export features.\[2]
+
+\- An active Solid Edge document with an active sketch when using profile reading.\[2]
+
+
+
+\## Notes
+
+
+
+The program is designed as a practical geometry authoring tool rather than only a visual demo. Because the canvas, export module, and Solid Edge integration all operate on shared geometric representations, changes made in the editor can be carried through to CAD-oriented output with minimal manual reconstruction.\[3]\[2]\[4]
+

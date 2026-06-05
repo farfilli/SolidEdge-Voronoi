@@ -64,9 +64,9 @@ Namespace My
     Friend Module MySettingsProperty
 
         <Global.System.ComponentModel.Design.HelpKeywordAttribute("My.Settings")> _
-        Friend ReadOnly Property Settings() As Global.SolidEdge_Voronoi.My.MySettings
+        Friend ReadOnly Property Settings() As Global.SE_Voronoi.My.MySettings
             Get
-                Return Global.SolidEdge_Voronoi.My.MySettings.Default
+                Return Global.SE_Voronoi.My.MySettings.Default
             End Get
         End Property
     End Module
