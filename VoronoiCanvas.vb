@@ -57,6 +57,7 @@ Public Class VoronoiCanvas
 
     Public Property Cells As List(Of VoronoiCell) = New List(Of VoronoiCell)
     Public Property EditableSeeds As List(Of Vec2) = New List(Of Vec2)
+    Public Property SeedStyleKeys As List(Of Integer) = New List(Of Integer)
     Public Property Domain As RectangleF = New RectangleF(0, 0, 1000, 700)
 
     Public Property SketchBoundaries As List(Of List(Of Vec2)) = New List(Of List(Of Vec2))
@@ -195,7 +196,7 @@ Public Class VoronoiCanvas
                     End Using
                 End If
 
-                Dim effectiveStyle As CellRenderStyle = GetEffectiveRenderStyle(cell)
+                Dim effectiveStyle As CellRenderStyle = GetEffectiveRenderStyle(i)
 
                 Select Case effectiveStyle
                     Case CellRenderStyle.Straight
@@ -936,6 +937,36 @@ Public Class VoronoiCanvas
         If idx >= count Then idx = count - 1
 
         Return idx
+    End Function
+
+    Private Function GetStableRandomSymbolStyleByIndex(cellIndex As Integer) As CellRenderStyle
+        Dim styles As CellRenderStyle() = {
+            CellRenderStyle.Circle,
+            CellRenderStyle.Square,
+            CellRenderStyle.RoundedSquare,
+            CellRenderStyle.Triangle,
+            CellRenderStyle.Pentagon,
+            CellRenderStyle.Hexagon,
+            CellRenderStyle.Octagon,
+            CellRenderStyle.Star,
+            CellRenderStyle.Star3,
+            CellRenderStyle.Star4
+        }
+
+        If styles.Length = 0 Then Return CellRenderStyle.Circle
+
+        Dim key As Integer = 0
+        If SeedStyleKeys IsNot Nothing AndAlso cellIndex >= 0 AndAlso cellIndex < SeedStyleKeys.Count Then
+            key = SeedStyleKeys(cellIndex)
+        End If
+
+        Dim idx As Integer = Math.Abs(key) Mod styles.Length
+        Return styles(idx)
+    End Function
+
+    Private Function GetEffectiveRenderStyle(cellIndex As Integer) As CellRenderStyle
+        If RenderStyle <> CellRenderStyle.Random Then Return RenderStyle
+        Return GetStableRandomSymbolStyleByIndex(cellIndex)
     End Function
 
 End Class

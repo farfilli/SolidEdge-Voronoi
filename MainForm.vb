@@ -51,6 +51,7 @@ Public Class MainForm
     Private lockSketchViewDomain As Boolean = False
 
     Private currentSeeds As New List(Of Vec2)
+    Private currentSeedStyleKeys As New List(Of Integer)
 
     Private currentSketchBoundaries As New List(Of List(Of Vec2))
     Private currentSketchDomains As New List(Of SketchDomainRegion)
@@ -406,11 +407,8 @@ Public Class MainForm
             Return
         End If
 
-        lockSketchViewDomain = False
-        currentWorldDomain = domain
-        canvas.Domain = currentWorldDomain
-
         currentSeeds = VoronoiEngine.CreateSeeds(CInt(numCells.Value), domain, CInt(numSeed.Value))
+        RebuildSeedStyleKeys(currentSeeds.Count, CInt(numSeed.Value))
 
         For i As Integer = 1 To CInt(numRelax.Value)
             Dim tmpCells = VoronoiEngine.BuildCells(currentSeeds, domain)
@@ -423,6 +421,7 @@ Public Class MainForm
     Private Sub GenerateDiagramFromSketchDomains()
         Dim allCells As New List(Of VoronoiCell)
         Dim allSeeds As New List(Of Vec2)
+        Dim allStyleKeys As New List(Of Integer)
 
         If currentSketchDomains Is Nothing OrElse currentSketchDomains.Count = 0 Then Return
 
@@ -430,7 +429,6 @@ Public Class MainForm
         For Each d In currentSketchDomains
             totalOuterArea += Math.Abs(Geo2D.SignedArea(d.Outer))
         Next
-
         If totalOuterArea <= 0.0001 Then Return
 
         Dim requestedCount As Integer = CInt(numCells.Value)
@@ -448,27 +446,48 @@ Public Class MainForm
             quota = Math.Max(0, quota)
             If quota = 0 Then Continue For
 
-            Dim seeds = VoronoiEngine.CreateSeeds(quota, d.Bounds, d.Outer, d.Holes, seedBase + i * 997)
+            Dim regionSeed As Integer = seedBase + i * 997
+            Dim seeds = VoronoiEngine.CreateSeeds(quota, d.Bounds, d.Outer, d.Holes, regionSeed)
+
+            Dim regionStyleKeys As New List(Of Integer)
+            Dim rng As New Random(regionSeed Xor &H51F15E)
+            For k As Integer = 0 To seeds.Count - 1
+                regionStyleKeys.Add(rng.Next())
+            Next
 
             For r As Integer = 1 To CInt(numRelax.Value)
                 Dim tmpCells = VoronoiEngine.BuildCells(seeds, d.Outer, d.Holes)
                 seeds = VoronoiEngine.RelaxSeeds(tmpCells)
-                seeds = FilterSeedsInsideDomain(seeds, d)
-                If seeds.Count = 0 Then Exit For
-            Next
 
-            If seeds.Count = 0 Then Continue For
+                Dim filteredSeeds As New List(Of Vec2)
+                Dim filteredKeys As New List(Of Integer)
+
+                For k As Integer = 0 To seeds.Count - 1
+                    If Geo2D.PointInPolygonWithHoles(seeds(k), d.Outer, d.Holes) Then
+                        filteredSeeds.Add(seeds(k))
+                        If k < regionStyleKeys.Count Then
+                            filteredKeys.Add(regionStyleKeys(k))
+                        End If
+                    End If
+                Next
+
+                seeds = filteredSeeds
+                regionStyleKeys = filteredKeys
+            Next
 
             Dim cells = VoronoiEngine.BuildCells(seeds, d.Outer, d.Holes)
 
             allSeeds.AddRange(seeds)
             allCells.AddRange(cells)
+            allStyleKeys.AddRange(regionStyleKeys)
         Next
 
         currentSeeds = allSeeds
-        canvas.Domain = currentWorldDomain
+        currentSeedStyleKeys = allStyleKeys
+
         canvas.Cells = allCells
         canvas.EditableSeeds = New List(Of Vec2)(allSeeds)
+        canvas.SeedStyleKeys = New List(Of Integer)(currentSeedStyleKeys)
 
         ApplyOptions()
         canvas.Invalidate()
@@ -476,6 +495,7 @@ Public Class MainForm
 
     Private Sub Canvas_SeedsEdited(sender As Object, e As EventArgs)
         currentSeeds = New List(Of Vec2)(canvas.EditableSeeds)
+        EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
         BuildFromCurrentSeeds()
     End Sub
 
@@ -508,6 +528,8 @@ Public Class MainForm
             canvas.Cells = cells
             canvas.EditableSeeds = New List(Of Vec2)(currentSeeds)
         End If
+
+        canvas.SeedStyleKeys = New List(Of Integer)(currentSeedStyleKeys)
 
         ApplyOptions()
         canvas.Invalidate()
@@ -761,4 +783,30 @@ Public Class MainForm
                             MessageBoxIcon.Error)
         End Try
     End Sub
+
+    Private Sub RebuildSeedStyleKeys(count As Integer, baseSeed As Integer)
+        currentSeedStyleKeys = New List(Of Integer)(count)
+
+        Dim rng As New Random(baseSeed Xor &H51F15E)
+        For i As Integer = 0 To count - 1
+            currentSeedStyleKeys.Add(rng.Next())
+        Next
+    End Sub
+
+    Private Sub EnsureSeedStyleKeyCount(count As Integer, baseSeed As Integer)
+        If currentSeedStyleKeys Is Nothing Then
+            currentSeedStyleKeys = New List(Of Integer)()
+        End If
+
+        While currentSeedStyleKeys.Count < count
+            Dim extraSeed As Integer = baseSeed Xor (currentSeedStyleKeys.Count * 104729)
+            Dim rng As New Random(extraSeed)
+            currentSeedStyleKeys.Add(rng.Next())
+        End While
+
+        While currentSeedStyleKeys.Count > count
+            currentSeedStyleKeys.RemoveAt(currentSeedStyleKeys.Count - 1)
+        End While
+    End Sub
+
 End Class

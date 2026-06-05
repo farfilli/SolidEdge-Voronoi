@@ -94,7 +94,7 @@ Public Module ExportGeometry
             If cell Is Nothing OrElse cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Continue For
 
             Dim p As ExportPath2D = Nothing
-            Dim effectiveStyle As CellRenderStyle = GetEffectiveRenderStyle(canvas, cell)
+            Dim effectiveStyle As CellRenderStyle = GetEffectiveRenderStyle(canvas, cellIndex)
 
             Select Case effectiveStyle
                 Case CellRenderStyle.Straight
@@ -136,7 +136,6 @@ Public Module ExportGeometry
 
                 Case CellRenderStyle.Star4
                     p = BuildStarSymbolPath(cell, canvas.CellScale, canvas.RandomRotation, 4, 0.45, -Math.PI / 4.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge)
-
             End Select
 
             If p IsNot Nothing AndAlso p.Segments.Count > 0 Then
@@ -619,6 +618,36 @@ Public Module ExportGeometry
         If idx >= count Then idx = count - 1
 
         Return idx
+    End Function
+
+    Private Function GetStableRandomSymbolStyle(canvas As VoronoiCanvas, cellIndex As Integer) As CellRenderStyle
+        Dim styles As CellRenderStyle() = {
+            CellRenderStyle.Circle,
+            CellRenderStyle.Square,
+            CellRenderStyle.RoundedSquare,
+            CellRenderStyle.Triangle,
+            CellRenderStyle.Pentagon,
+            CellRenderStyle.Hexagon,
+            CellRenderStyle.Octagon,
+            CellRenderStyle.Star,
+            CellRenderStyle.Star3,
+            CellRenderStyle.Star4
+        }
+
+        If styles.Length = 0 Then Return CellRenderStyle.Circle
+
+        Dim key As Integer = 0
+        If canvas.SeedStyleKeys IsNot Nothing AndAlso cellIndex >= 0 AndAlso cellIndex < canvas.SeedStyleKeys.Count Then
+            key = canvas.SeedStyleKeys(cellIndex)
+        End If
+
+        Dim idx As Integer = Math.Abs(key) Mod styles.Length
+        Return styles(idx)
+    End Function
+
+    Private Function GetEffectiveRenderStyle(canvas As VoronoiCanvas, cellIndex As Integer) As CellRenderStyle
+        If canvas.RenderStyle <> CellRenderStyle.Random Then Return canvas.RenderStyle
+        Return GetStableRandomSymbolStyle(canvas, cellIndex)
     End Function
 
 End Module
