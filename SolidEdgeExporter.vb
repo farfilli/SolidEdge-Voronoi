@@ -2,6 +2,7 @@
 Imports System.Collections.Generic
 Imports System.Drawing
 Imports System.Runtime.InteropServices
+Imports SolidEdgeFrameworkSupport
 
 Public Module SolidEdgeExporter
 
@@ -87,11 +88,21 @@ Public Module SolidEdgeExporter
                     Dim y2 As Double = 0.0
                     arc.GetEndPoint(x2, y2)
 
+                    Dim xm As Double = Nothing
+                    Dim ym As Double = Nothing
+                    Dim zm As Double = Nothing
+                    Dim KeyPointType As SolidEdgeConstants.KeyPointType = SolidEdgeConstants.KeyPointType.igKeyPointMiddle
+                    Dim HandleType As SolidEdgeConstants.HandleType = Nothing
+                    Dim arc2d As Arc2d = arc
+
+                    arc2d.GetKeyPoint(1, xm, ym, zm, KeyPointType, HandleType)
+
                     Dim center As New Vec2(xc * 1000.0, -yc * 1000.0)
                     Dim startPt As New Vec2(x1 * 1000.0, -y1 * 1000.0)
                     Dim endPt As New Vec2(x2 * 1000.0, -y2 * 1000.0)
+                    Dim midPt As New Vec2(xm * 1000.0, -ym * 1000.0)
 
-                    Dim pts = SampleArc(center, startPt, endPt, 24)
+                    Dim pts = SampleArcThroughPoint(center, startPt, midPt, endPt, 24)
                     If pts.Count >= 2 Then
                         pieces.Add(New BoundaryPiece With {.Points = pts})
                     End If
@@ -227,34 +238,60 @@ Public Module SolidEdgeExporter
            inner.Bottom <= outer.Bottom + eps
     End Function
 
-    Private Function SampleArc(center As Vec2,
-                               startPt As Vec2,
-                               endPt As Vec2,
-                               steps As Integer) As List(Of Vec2)
+    Private Function SampleArcThroughPoint(center As Vec2,
+                                       startPt As Vec2,
+                                       midPt As Vec2,
+                                       endPt As Vec2,
+                                       steps As Integer) As List(Of Vec2)
 
         Dim pts As New List(Of Vec2)
         Dim r As Double = Geo2D.Distance(center, startPt)
         If r <= 0.0001 Then Return pts
 
         Dim a1 As Double = Math.Atan2(startPt.Y - center.Y, startPt.X - center.X)
+        Dim am As Double = Math.Atan2(midPt.Y - center.Y, midPt.X - center.X)
         Dim a2 As Double = Math.Atan2(endPt.Y - center.Y, endPt.X - center.X)
 
-        Dim sweep As Double = a2 - a1
-        While sweep <= -Math.PI
-            sweep += Math.PI * 2.0
-        End While
-        While sweep > Math.PI
-            sweep -= Math.PI * 2.0
-        End While
+        Dim sweepCCW As Double = NormalizeAngleRad(a2 - a1)
+        Dim sweepCW As Double = sweepCCW - Math.PI * 2.0
+
+        Dim midCCW As Boolean = AngleBelongsToSweepRad(a1, sweepCCW, am)
+
+        Dim sweep As Double = If(midCCW, sweepCCW, sweepCW)
 
         For i As Integer = 0 To steps
             Dim t As Double = i / CDbl(steps)
             Dim a As Double = a1 + sweep * t
             pts.Add(New Vec2(center.X + Math.Cos(a) * r,
-                             center.Y + Math.Sin(a) * r))
+                         center.Y + Math.Sin(a) * r))
         Next
 
         Return Geo2D.RemoveDuplicateSequentialPoints(pts)
+    End Function
+
+    Private Function NormalizeAngleRad(angle As Double) As Double
+        While angle < 0.0
+            angle += Math.PI * 2.0
+        End While
+        While angle >= Math.PI * 2.0
+            angle -= Math.PI * 2.0
+        End While
+        Return angle
+    End Function
+
+    Private Function AngleBelongsToSweepRad(startAngle As Double,
+                                        sweep As Double,
+                                        testAngle As Double) As Boolean
+        startAngle = NormalizeAngleRad(startAngle)
+        testAngle = NormalizeAngleRad(testAngle)
+
+        If sweep >= 0 Then
+            Dim delta = NormalizeAngleRad(testAngle - startAngle)
+            Return delta <= sweep + 0.000001
+        Else
+            Dim delta = NormalizeAngleRad(startAngle - testAngle)
+            Return delta <= (-sweep) + 0.000001
+        End If
     End Function
 
     Private Function SampleCircle(center As Vec2,
