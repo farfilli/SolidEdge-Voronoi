@@ -287,7 +287,7 @@ Public Class MainForm
         numSeed.Value = 12345
 
         numRelax.Minimum = 0
-        numRelax.Maximum = 100
+        numRelax.Maximum = 30
         numRelax.Value = 1
 
         numCellScale.Minimum = 0.05D
