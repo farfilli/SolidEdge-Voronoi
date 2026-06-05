@@ -113,6 +113,10 @@ Public Class MainForm
 
         AddHandler canvas.SeedsEdited, AddressOf Canvas_SeedsEdited
 
+        AddHandler numCells.ValueChanged, AddressOf GenerationParameterChanged
+        AddHandler numSeed.ValueChanged, AddressOf GenerationParameterChanged
+        AddHandler numRelax.ValueChanged, AddressOf GenerationParameterChanged
+
         GenerateRandomDiagram(Nothing, EventArgs.Empty)
     End Sub
 
@@ -283,7 +287,7 @@ Public Class MainForm
         numSeed.Value = 12345
 
         numRelax.Minimum = 0
-        numRelax.Maximum = 10
+        numRelax.Maximum = 100
         numRelax.Value = 1
 
         numCellScale.Minimum = 0.05D
@@ -807,6 +811,10 @@ Public Class MainForm
         While currentSeedStyleKeys.Count > count
             currentSeedStyleKeys.RemoveAt(currentSeedStyleKeys.Count - 1)
         End While
+    End Sub
+
+    Private Sub GenerationParameterChanged(sender As Object, e As EventArgs)
+        GenerateRandomDiagram(sender, e)
     End Sub
 
 End Class
