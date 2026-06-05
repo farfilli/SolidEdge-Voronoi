@@ -136,41 +136,23 @@ Public Class MainForm
         AddRowTitle("Cell Style")
         AddRowControl(cmbStyle)
 
-        AddRowTitle("Corner Mode (Inner)")
-        AddRowControl(cmbInnerCorner)
+        AddDoubleRow("Corner Mode (Inner)", cmbInnerCorner,
+             "Corner Mode (Symbols)", cmbSymbolCorner)
 
-        AddRowTitle("Corner Mode (Symbols)")
-        AddRowControl(cmbSymbolCorner)
+        AddDoubleRow("Cell Count", numCells,
+             "Random Seed", numSeed)
 
-        AddRowTitle("Cell Count")
-        AddRowControl(numCells)
+        AddDoubleRow("Relax", numRelax,
+             "Cell Scale", numCellScale)
 
-        AddRowTitle("Random Seed")
-        AddRowControl(numSeed)
+        AddDoubleRow("Inner Offset", numInnerOffset,
+             "Inner Trim", numCornerTrim)
 
-        AddRowTitle("Relax")
-        AddRowControl(numRelax)
+        AddDoubleRow("Inner Bezier Bulge", numBezierBulge,
+             "Symbol Trim", numSymbolCornerTrim)
 
-        AddRowTitle("Cell Scale")
-        AddRowControl(numCellScale)
-
-        AddRowTitle("Inner Offset")
-        AddRowControl(numInnerOffset)
-
-        AddRowTitle("Inner Trim")
-        AddRowControl(numCornerTrim)
-
-        AddRowTitle("Inner Bezier Bulge")
-        AddRowControl(numBezierBulge)
-
-        AddRowTitle("Symbol Trim")
-        AddRowControl(numSymbolCornerTrim)
-
-        AddRowTitle("Symbol Bezier Bulge")
-        AddRowControl(numSymbolBezierBulge)
-
-        AddRowTitle("Curve Width")
-        AddRowControl(numCurveWidth)
+        AddDoubleRow("Symbol Bezier Bulge", numSymbolBezierBulge,
+             "Curve Width", numCurveWidth)
 
         AddRowControl(chkFill)
         AddRowControl(chkOuter)
@@ -211,6 +193,72 @@ Public Class MainForm
         ctrl.Margin = New Padding(3, 0, 3, 3)
         sideLayout.Controls.Add(ctrl)
     End Sub
+
+
+    Private Sub AddDoubleRow(leftTitle As String,
+                         leftCtrl As Control,
+                         rightTitle As String,
+                         rightCtrl As Control,
+                         Optional controlHeight As Integer = 28)
+
+        sideLayout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+
+        Dim host As New TableLayoutPanel With {
+        .ColumnCount = 2,
+        .RowCount = 1,
+        .Width = 235,
+        .AutoSize = True,
+        .Margin = New Padding(3, 0, 3, 3),
+        .Padding = New Padding(0)
+    }
+
+        host.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50.0F))
+        host.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50.0F))
+
+        Dim leftPanel = BuildLabeledControlPanel(leftTitle, leftCtrl, controlHeight)
+        Dim rightPanel = BuildLabeledControlPanel(rightTitle, rightCtrl, controlHeight)
+
+        host.Controls.Add(leftPanel, 0, 0)
+        host.Controls.Add(rightPanel, 1, 0)
+
+        sideLayout.Controls.Add(host)
+    End Sub
+
+    Private Function BuildLabeledControlPanel(title As String,
+                                          ctrl As Control,
+                                          forcedHeight As Integer) As Control
+
+        Dim panel As New TableLayoutPanel With {
+        .ColumnCount = 1,
+        .RowCount = 2,
+        .Dock = DockStyle.Fill,
+        .AutoSize = True,
+        .Margin = New Padding(0),
+        .Padding = New Padding(0)
+    }
+
+        panel.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+        panel.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+
+        Dim lbl As New Label With {
+        .Text = title,
+        .ForeColor = Color.FromArgb(30, 40, 55),
+        .AutoSize = False,
+        .Height = 18,
+        .Dock = DockStyle.Top,
+        .Margin = New Padding(0, 4, 4, 1),
+        .TextAlign = ContentAlignment.BottomLeft
+    }
+
+        ctrl.Dock = DockStyle.Top
+        ctrl.Height = forcedHeight
+        ctrl.Margin = New Padding(0, 0, 4, 0)
+
+        panel.Controls.Add(lbl, 0, 0)
+        panel.Controls.Add(ctrl, 0, 1)
+
+        Return panel
+    End Function
 
     Private Sub ConfigureControls()
         cmbStyle.DropDownStyle = ComboBoxStyle.DropDownList
@@ -317,7 +365,7 @@ Public Class MainForm
         btnShuffle.ForeColor = Color.FromArgb(30, 40, 55)
         btnShuffle.FlatStyle = FlatStyle.Flat
 
-        btnReadSketchProfile.Text = "Leggi profilo sketch"
+        btnReadSketchProfile.Text = "Read Solid Edge Sketch Profile"
         btnReadSketchProfile.UseVisualStyleBackColor = False
         btnReadSketchProfile.BackColor = Color.White
         btnReadSketchProfile.ForeColor = Color.FromArgb(30, 40, 55)
