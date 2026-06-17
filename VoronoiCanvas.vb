@@ -95,6 +95,17 @@ Public Class VoronoiCanvas
     Private hoverSeedIndex As Integer = -1
     Private isDragging As Boolean = False
 
+
+    Public Event SeedScalesEdited As EventHandler
+
+    Public Property CellScales As List(Of Single) = New List(Of Single)
+    Public Property MinCellScale As Single = 0.05F
+    Public Property MaxCellScale As Single = 1.5F
+    Public Property MouseWheelScaleStep As Single = 0.02F
+
+
+
+
     Public Sub New()
         SetStyle(ControlStyles.UserPaint Or
                  ControlStyles.AllPaintingInWmPaint Or
@@ -180,8 +191,75 @@ Public Class VoronoiCanvas
         End Using
     End Sub
 
+    'Private Sub DrawCells(g As Graphics, view As ViewInfo)
+    '    If Cells Is Nothing OrElse Cells.Count = 0 Then Return
+
+    '    Using outerPen As New Pen(Color.FromArgb(210, 180, 245, 240), 1.2F)
+    '        For i As Integer = 0 To Cells.Count - 1
+    '            Dim cell = Cells(i)
+    '            If cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Continue For
+
+    '            Dim outerPts(cell.Vertices.Count - 1) As PointF
+    '            For k As Integer = 0 To cell.Vertices.Count - 1
+    '                outerPts(k) = WorldToScreen(cell.Vertices(k), view)
+    '            Next
+
+    '            If FillCells Then
+    '                Using br As New SolidBrush(GetCellColor(i, 42))
+    '                    g.FillPolygon(br, outerPts)
+    '                End Using
+    '            End If
+
+    '            Dim effectiveStyle As CellRenderStyle = GetEffectiveRenderStyle(i)
+
+    '            Select Case effectiveStyle
+    '                Case CellRenderStyle.Straight
+    '                    If ShowOuterEdges Then
+    '                        g.DrawPolygon(outerPen, outerPts)
+    '                    End If
+
+    '                Case CellRenderStyle.Curved
+    '                    If ShowOuterEdges Then
+    '                        g.DrawPolygon(Pens.DimGray, outerPts)
+    '                    End If
+
+    '                    If ShowInnerCurve Then
+    '                        Using path As GraphicsPath = BuildInnerRoundedPath(cell.Vertices, view, InnerOffset, CornerTrim, BezierBulge)
+    '                            If path IsNot Nothing Then
+    '                                Using innerPen As New Pen(GetCellColor(i, 235), InnerCurveWidth)
+    '                                    innerPen.LineJoin = LineJoin.Round
+    '                                    innerPen.StartCap = LineCap.Round
+    '                                    innerPen.EndCap = LineCap.Round
+    '                                    g.DrawPath(innerPen, path)
+    '                                End Using
+    '                            End If
+    '                        End Using
+    '                    End If
+
+    '                Case Else
+    '                    If ShowOuterEdges Then
+    '                        g.DrawPolygon(Pens.DimGray, outerPts)
+    '                    End If
+
+    '                    Using path As GraphicsPath = BuildSymbolPath(cell, view, effectiveStyle, CellScale, RandomRotation, i)
+    '                        If path IsNot Nothing Then
+    '                            Using symbolPen As New Pen(GetCellColor(i, 240), InnerCurveWidth)
+    '                                symbolPen.LineJoin = LineJoin.Round
+    '                                symbolPen.StartCap = LineCap.Round
+    '                                symbolPen.EndCap = LineCap.Round
+    '                                g.DrawPath(symbolPen, path)
+    '                            End Using
+    '                        End If
+    '                    End Using
+    '            End Select
+    '        Next
+    '    End Using
+    'End Sub
+
     Private Sub DrawCells(g As Graphics, view As ViewInfo)
         If Cells Is Nothing OrElse Cells.Count = 0 Then Return
+
+        EnsureCellScaleCount(Cells.Count)
 
         Using outerPen As New Pen(Color.FromArgb(210, 180, 245, 240), 1.2F)
             For i As Integer = 0 To Cells.Count - 1
@@ -230,7 +308,12 @@ Public Class VoronoiCanvas
                             g.DrawPolygon(Pens.DimGray, outerPts)
                         End If
 
-                        Using path As GraphicsPath = BuildSymbolPath(cell, view, effectiveStyle, CellScale, RandomRotation, i)
+                        Using path As GraphicsPath = BuildSymbolPath(cell,
+                                                                 view,
+                                                                 effectiveStyle,
+                                                                 GetEffectiveCellScale(i),
+                                                                 RandomRotation,
+                                                                 i)
                             If path IsNot Nothing Then
                                 Using symbolPen As New Pen(GetCellColor(i, 240), InnerCurveWidth)
                                     symbolPen.LineJoin = LineJoin.Round
@@ -245,11 +328,78 @@ Public Class VoronoiCanvas
         End Using
     End Sub
 
+    'Private Function BuildSymbolPath(cell As VoronoiCell,
+    '                                 view As ViewInfo,
+    '                                 style As CellRenderStyle,
+    '                                 scaleFactor As Single,
+    '                                 randomRotation As Boolean, cellIndex As Integer) As GraphicsPath
+
+    '    If cell Is Nothing OrElse cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Return Nothing
+
+    '    Dim c As Vec2 = Geo2D.PolygonCentroid(cell.Vertices)
+    '    Dim radius As Double = GetInscribedRadius(cell.Vertices, c)
+    '    If radius <= 0.0001 Then Return Nothing
+
+    '    radius *= Math.Max(0.05, Math.Min(1.5, scaleFactor))
+
+    '    'Dim angle As Double = 0.0
+    '    'If randomRotation Then
+    '    '    angle = GetStableAngleFromSeed(cell.Seed)
+    '    'End If
+
+    '    Dim angle As Double = 0.0
+    '    If randomRotation Then
+    '        angle = GetStableAngleFromKey(cellIndex)
+    '    End If
+
+    '    Dim center As PointF = WorldToScreen(c, view)
+    '    Dim radiusPx As Single = CSng(radius * view.Scale)
+
+    '    Select Case style
+    '        Case CellRenderStyle.Circle
+    '            Return BuildCirclePath(center, radiusPx)
+
+    '        Case CellRenderStyle.Square
+    '            Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 4, angle))
+
+    '        Case CellRenderStyle.RoundedSquare
+    '            Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 4, angle))
+
+    '        Case CellRenderStyle.Triangle
+    '            Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 3, angle - Math.PI / 2.0))
+
+    '        Case CellRenderStyle.Pentagon
+    '            Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 5, angle - Math.PI / 2.0))
+
+    '        Case CellRenderStyle.Hexagon
+    '            Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 6, angle))
+
+    '        Case CellRenderStyle.Octagon
+    '            Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 8, angle))
+
+    '        Case CellRenderStyle.Star
+    '            Return BuildCorneredSymbolPath(BuildStarPoints(center, radiusPx, 5, 0.46F, angle - Math.PI / 2.0))
+
+    '        Case CellRenderStyle.Star3
+    '            Return BuildCorneredSymbolPath(BuildStarPoints(center, radiusPx, 3, 0.3F, angle - Math.PI / 2.0))
+    '        Case CellRenderStyle.Star4
+    '            Return BuildCorneredSymbolPath(BuildStarPoints(center, radiusPx, 4, 0.45F, angle - Math.PI / 4.0))
+
+    '        Case CellRenderStyle.BlockSymbol
+    '            Return BuildBlockSymbolPath(center, radiusPx, angle)
+
+    '        Case Else
+    '            Return Nothing
+    '    End Select
+    'End Function
+
+
     Private Function BuildSymbolPath(cell As VoronoiCell,
-                                     view As ViewInfo,
-                                     style As CellRenderStyle,
-                                     scaleFactor As Single,
-                                     randomRotation As Boolean, cellIndex As Integer) As GraphicsPath
+                                 view As ViewInfo,
+                                 style As CellRenderStyle,
+                                 scaleFactor As Single,
+                                 randomRotation As Boolean,
+                                 cellIndex As Integer) As GraphicsPath
 
         If cell Is Nothing OrElse cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Return Nothing
 
@@ -257,16 +407,11 @@ Public Class VoronoiCanvas
         Dim radius As Double = GetInscribedRadius(cell.Vertices, c)
         If radius <= 0.0001 Then Return Nothing
 
-        radius *= Math.Max(0.05, Math.Min(1.5, scaleFactor))
-
-        'Dim angle As Double = 0.0
-        'If randomRotation Then
-        '    angle = GetStableAngleFromSeed(cell.Seed)
-        'End If
+        radius *= Math.Max(MinCellScale, Math.Min(MaxCellScale, scaleFactor))
 
         Dim angle As Double = 0.0
         If randomRotation Then
-            angle = GetStableAngleFromKey(cellIndex)
+            angle = GetStableAngleByIndex(cellIndex)
         End If
 
         Dim center As PointF = WorldToScreen(c, view)
@@ -299,6 +444,7 @@ Public Class VoronoiCanvas
 
             Case CellRenderStyle.Star3
                 Return BuildCorneredSymbolPath(BuildStarPoints(center, radiusPx, 3, 0.3F, angle - Math.PI / 2.0))
+
             Case CellRenderStyle.Star4
                 Return BuildCorneredSymbolPath(BuildStarPoints(center, radiusPx, 4, 0.45F, angle - Math.PI / 4.0))
 
@@ -309,6 +455,50 @@ Public Class VoronoiCanvas
                 Return Nothing
         End Select
     End Function
+
+
+    Private Sub EnsureCellScaleCount(requiredCount As Integer)
+        If CellScales Is Nothing Then
+            CellScales = New List(Of Single)()
+        End If
+
+        While CellScales.Count < requiredCount
+            CellScales.Add(ClampCellScale(CellScale))
+        End While
+
+        While CellScales.Count > requiredCount
+            CellScales.RemoveAt(CellScales.Count - 1)
+        End While
+    End Sub
+
+    Private Function ClampCellScale(value As Single) As Single
+        Return CSng(Math.Max(MinCellScale, Math.Min(MaxCellScale, value)))
+    End Function
+
+    Private Function GetEffectiveCellScale(cellIndex As Integer) As Single
+        If CellScales IsNot Nothing AndAlso cellIndex >= 0 AndAlso cellIndex < CellScales.Count Then
+            Return ClampCellScale(CellScales(cellIndex))
+        End If
+
+        Return ClampCellScale(CellScale)
+    End Function
+
+    Private Function IsSymbolStyle(style As CellRenderStyle) As Boolean
+        Return style <> CellRenderStyle.Straight AndAlso style <> CellRenderStyle.Curved
+    End Function
+
+    Private Function GetStableAngleByIndex(cellIndex As Integer) As Double
+        Dim key As Integer = cellIndex * 104729 + 17
+
+        If SeedStyleKeys IsNot Nothing AndAlso cellIndex >= 0 AndAlso cellIndex < SeedStyleKeys.Count Then
+            key = SeedStyleKeys(cellIndex)
+        End If
+
+        Dim v As Double = Math.Abs(key * 0.61803398875)
+        Dim frac As Double = v - Math.Floor(v)
+        Return frac * Math.PI * 2.0
+    End Function
+
 
     Private Function GetStableAngleFromKey(cellIndex As Integer) As Double
         Dim key As Integer = 0
@@ -894,6 +1084,38 @@ Public Class VoronoiCanvas
         Next
     End Sub
 
+    'Protected Overrides Sub OnMouseDown(e As MouseEventArgs)
+    '    MyBase.OnMouseDown(e)
+    '    If Not AllowSeedEditing Then Return
+
+    '    Dim idx = HitTestSeed(e.Location)
+
+    '    If e.Button = MouseButtons.Left Then
+    '        If idx >= 0 Then
+    '            dragSeedIndex = idx
+    '            isDragging = True
+    '            Capture = True
+    '            Invalidate()
+    '            Return
+    '        End If
+
+    '        If (ModifierKeys And Keys.Control) = Keys.Control Then
+    '            EditableSeeds.Add(ClampToDomain(ScreenToWorld(e.Location)))
+    '            RaiseEvent SeedsEdited(Me, EventArgs.Empty)
+    '            Invalidate()
+    '        End If
+    '    ElseIf e.Button = MouseButtons.Right Then
+    '        If idx >= 0 AndAlso EditableSeeds.Count > 3 Then
+    '            EditableSeeds.RemoveAt(idx)
+    '            hoverSeedIndex = -1
+    '            dragSeedIndex = -1
+    '            RaiseEvent SeedsEdited(Me, EventArgs.Empty)
+    '            Invalidate()
+    '        End If
+    '    End If
+    'End Sub
+
+
     Protected Overrides Sub OnMouseDown(e As MouseEventArgs)
         MyBase.OnMouseDown(e)
         If Not AllowSeedEditing Then Return
@@ -911,12 +1133,24 @@ Public Class VoronoiCanvas
 
             If (ModifierKeys And Keys.Control) = Keys.Control Then
                 EditableSeeds.Add(ClampToDomain(ScreenToWorld(e.Location)))
+                EnsureCellScaleCount(EditableSeeds.Count)
+                CellScales(EditableSeeds.Count - 1) = ClampCellScale(CellScale)
                 RaiseEvent SeedsEdited(Me, EventArgs.Empty)
                 Invalidate()
             End If
+
         ElseIf e.Button = MouseButtons.Right Then
             If idx >= 0 AndAlso EditableSeeds.Count > 3 Then
                 EditableSeeds.RemoveAt(idx)
+
+                If CellScales IsNot Nothing AndAlso idx < CellScales.Count Then
+                    CellScales.RemoveAt(idx)
+                End If
+
+                If SeedStyleKeys IsNot Nothing AndAlso idx < SeedStyleKeys.Count Then
+                    SeedStyleKeys.RemoveAt(idx)
+                End If
+
                 hoverSeedIndex = -1
                 dragSeedIndex = -1
                 RaiseEvent SeedsEdited(Me, EventArgs.Empty)
@@ -924,6 +1158,7 @@ Public Class VoronoiCanvas
             End If
         End If
     End Sub
+
 
     Protected Overrides Sub OnMouseMove(e As MouseEventArgs)
         MyBase.OnMouseMove(e)
@@ -951,14 +1186,61 @@ Public Class VoronoiCanvas
         End If
     End Sub
 
+    'Protected Overrides Sub OnMouseDoubleClick(e As MouseEventArgs)
+    '    MyBase.OnMouseDoubleClick(e)
+    '    If Not AllowSeedEditing Then Return
+
+    '    EditableSeeds.Add(ClampToDomain(ScreenToWorld(e.Location)))
+    '    RaiseEvent SeedsEdited(Me, EventArgs.Empty)
+    '    Invalidate()
+    'End Sub
+
     Protected Overrides Sub OnMouseDoubleClick(e As MouseEventArgs)
         MyBase.OnMouseDoubleClick(e)
         If Not AllowSeedEditing Then Return
 
         EditableSeeds.Add(ClampToDomain(ScreenToWorld(e.Location)))
+        EnsureCellScaleCount(EditableSeeds.Count)
+        CellScales(EditableSeeds.Count - 1) = ClampCellScale(CellScale)
+
         RaiseEvent SeedsEdited(Me, EventArgs.Empty)
         Invalidate()
     End Sub
+
+
+    Protected Overrides Sub OnMouseWheel(e As MouseEventArgs)
+        MyBase.OnMouseWheel(e)
+        If Not AllowSeedEditing Then Return
+
+        Dim idx As Integer = HitTestSeed(e.Location)
+        hoverSeedIndex = idx
+
+        If idx < 0 Then
+            Invalidate()
+            Return
+        End If
+
+        Dim effectiveStyle As CellRenderStyle = GetEffectiveRenderStyle(idx)
+        If Not IsSymbolStyle(effectiveStyle) Then
+            Invalidate()
+            Return
+        End If
+
+        EnsureCellScaleCount(EditableSeeds.Count)
+
+        Dim wheelSteps As Single = CSng(e.Delta) / 120.0F
+        If Math.Abs(wheelSteps) < 0.001F Then Return
+
+        Dim oldScale As Single = GetEffectiveCellScale(idx)
+        Dim newScale As Single = ClampCellScale(oldScale + MouseWheelScaleStep * wheelSteps)
+
+        If Math.Abs(newScale - oldScale) < 0.0001F Then Return
+
+        CellScales(idx) = newScale
+        RaiseEvent SeedScalesEdited(Me, EventArgs.Empty)
+        Invalidate()
+    End Sub
+
 
     Private Function GetEffectiveRenderStyle(cell As VoronoiCell) As CellRenderStyle
         If RenderStyle <> CellRenderStyle.Random Then Return RenderStyle

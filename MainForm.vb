@@ -54,6 +54,7 @@ Public Class MainForm
 
     Private currentSeeds As New List(Of Vec2)
     Private currentSeedStyleKeys As New List(Of Integer)
+    Private currentSeedCellScales As New List(Of Single)
 
     Private currentSketchBoundaries As New List(Of List(Of Vec2))
     Private currentSketchDomains As New List(Of SketchDomainRegion)
@@ -115,6 +116,7 @@ Public Class MainForm
         AddHandler numSymbolBezierBulge.ValueChanged, AddressOf RefreshCanvasOptions
 
         AddHandler canvas.SeedsEdited, AddressOf Canvas_SeedsEdited
+        AddHandler canvas.SeedScalesEdited, AddressOf Canvas_SeedScalesEdited
 
         AddHandler numCells.ValueChanged, AddressOf GenerationParameterChanged
         AddHandler numSeed.ValueChanged, AddressOf GenerationParameterChanged
@@ -415,6 +417,23 @@ Public Class MainForm
         GenerateRandomDiagram(sender, e)
     End Sub
 
+    'Private Sub GenerateRandomDiagram(sender As Object, e As EventArgs)
+    '    If useSketchDomains AndAlso currentSketchDomains IsNot Nothing AndAlso currentSketchDomains.Count > 0 Then
+    '        GenerateDiagramFromSketchDomains()
+    '        Return
+    '    End If
+
+    '    currentSeeds = VoronoiEngine.CreateSeeds(CInt(numCells.Value), domain, CInt(numSeed.Value))
+    '    RebuildSeedStyleKeys(currentSeeds.Count, CInt(numSeed.Value))
+
+    '    For i As Integer = 1 To CInt(numRelax.Value)
+    '        Dim tmpCells = VoronoiEngine.BuildCells(currentSeeds, domain)
+    '        currentSeeds = VoronoiEngine.RelaxSeeds(tmpCells)
+    '    Next
+
+    '    BuildFromCurrentSeeds()
+    'End Sub
+
     Private Sub GenerateRandomDiagram(sender As Object, e As EventArgs)
         If useSketchDomains AndAlso currentSketchDomains IsNot Nothing AndAlso currentSketchDomains.Count > 0 Then
             GenerateDiagramFromSketchDomains()
@@ -423,19 +442,99 @@ Public Class MainForm
 
         currentSeeds = VoronoiEngine.CreateSeeds(CInt(numCells.Value), domain, CInt(numSeed.Value))
         RebuildSeedStyleKeys(currentSeeds.Count, CInt(numSeed.Value))
+        RebuildSeedCellScales(currentSeeds.Count, CSng(numCellScale.Value))
 
         For i As Integer = 1 To CInt(numRelax.Value)
             Dim tmpCells = VoronoiEngine.BuildCells(currentSeeds, domain)
             currentSeeds = VoronoiEngine.RelaxSeeds(tmpCells)
         Next
 
+        EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
+        EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
+
         BuildFromCurrentSeeds()
     End Sub
+
+    'Private Sub GenerateDiagramFromSketchDomains()
+    '    Dim allCells As New List(Of VoronoiCell)
+    '    Dim allSeeds As New List(Of Vec2)
+    '    Dim allStyleKeys As New List(Of Integer)
+
+    '    If currentSketchDomains Is Nothing OrElse currentSketchDomains.Count = 0 Then Return
+
+    '    Dim totalOuterArea As Double = 0.0
+    '    For Each d In currentSketchDomains
+    '        totalOuterArea += Math.Abs(Geo2D.SignedArea(d.Outer))
+    '    Next
+    '    If totalOuterArea <= 0.0001 Then Return
+
+    '    Dim requestedCount As Integer = CInt(numCells.Value)
+    '    Dim seedBase As Integer = CInt(numSeed.Value)
+
+    '    For i As Integer = 0 To currentSketchDomains.Count - 1
+    '        Dim d = currentSketchDomains(i)
+    '        Dim area As Double = Math.Abs(Geo2D.SignedArea(d.Outer))
+    '        Dim quota As Integer = CInt(Math.Round(requestedCount * (area / totalOuterArea)))
+
+    '        If i = currentSketchDomains.Count - 1 Then
+    '            quota = requestedCount - allSeeds.Count
+    '        End If
+
+    '        quota = Math.Max(0, quota)
+    '        If quota = 0 Then Continue For
+
+    '        Dim regionSeed As Integer = seedBase + i * 997
+    '        Dim seeds = VoronoiEngine.CreateSeeds(quota, d.Bounds, d.Outer, d.Holes, regionSeed)
+
+    '        Dim regionStyleKeys As New List(Of Integer)
+    '        Dim rng As New Random(regionSeed Xor &H51F15E)
+    '        For k As Integer = 0 To seeds.Count - 1
+    '            regionStyleKeys.Add(rng.Next())
+    '        Next
+
+    '        For r As Integer = 1 To CInt(numRelax.Value)
+    '            Dim tmpCells = VoronoiEngine.BuildCells(seeds, d.Outer, d.Holes)
+    '            seeds = VoronoiEngine.RelaxSeeds(tmpCells)
+
+    '            Dim filteredSeeds As New List(Of Vec2)
+    '            Dim filteredKeys As New List(Of Integer)
+
+    '            For k As Integer = 0 To seeds.Count - 1
+    '                If Geo2D.PointInPolygonWithHoles(seeds(k), d.Outer, d.Holes) Then
+    '                    filteredSeeds.Add(seeds(k))
+    '                    If k < regionStyleKeys.Count Then
+    '                        filteredKeys.Add(regionStyleKeys(k))
+    '                    End If
+    '                End If
+    '            Next
+
+    '            seeds = filteredSeeds
+    '            regionStyleKeys = filteredKeys
+    '        Next
+
+    '        Dim cells = VoronoiEngine.BuildCells(seeds, d.Outer, d.Holes)
+
+    '        allSeeds.AddRange(seeds)
+    '        allCells.AddRange(cells)
+    '        allStyleKeys.AddRange(regionStyleKeys)
+    '    Next
+
+    '    currentSeeds = allSeeds
+    '    currentSeedStyleKeys = allStyleKeys
+
+    '    canvas.Cells = allCells
+    '    canvas.EditableSeeds = New List(Of Vec2)(allSeeds)
+    '    canvas.SeedStyleKeys = New List(Of Integer)(currentSeedStyleKeys)
+
+    '    ApplyOptions()
+    '    canvas.Invalidate()
+    'End Sub
 
     Private Sub GenerateDiagramFromSketchDomains()
         Dim allCells As New List(Of VoronoiCell)
         Dim allSeeds As New List(Of Vec2)
         Dim allStyleKeys As New List(Of Integer)
+        Dim allScales As New List(Of Single)
 
         If currentSketchDomains Is Nothing OrElse currentSketchDomains.Count = 0 Then Return
 
@@ -447,6 +546,7 @@ Public Class MainForm
 
         Dim requestedCount As Integer = CInt(numCells.Value)
         Dim seedBase As Integer = CInt(numSeed.Value)
+        Dim defaultScale As Single = CSng(numCellScale.Value)
 
         For i As Integer = 0 To currentSketchDomains.Count - 1
             Dim d = currentSketchDomains(i)
@@ -464,9 +564,12 @@ Public Class MainForm
             Dim seeds = VoronoiEngine.CreateSeeds(quota, d.Bounds, d.Outer, d.Holes, regionSeed)
 
             Dim regionStyleKeys As New List(Of Integer)
+            Dim regionScales As New List(Of Single)
             Dim rng As New Random(regionSeed Xor &H51F15E)
+
             For k As Integer = 0 To seeds.Count - 1
                 regionStyleKeys.Add(rng.Next())
+                regionScales.Add(defaultScale)
             Next
 
             For r As Integer = 1 To CInt(numRelax.Value)
@@ -475,18 +578,25 @@ Public Class MainForm
 
                 Dim filteredSeeds As New List(Of Vec2)
                 Dim filteredKeys As New List(Of Integer)
+                Dim filteredScales As New List(Of Single)
 
                 For k As Integer = 0 To seeds.Count - 1
                     If Geo2D.PointInPolygonWithHoles(seeds(k), d.Outer, d.Holes) Then
                         filteredSeeds.Add(seeds(k))
+
                         If k < regionStyleKeys.Count Then
                             filteredKeys.Add(regionStyleKeys(k))
+                        End If
+
+                        If k < regionScales.Count Then
+                            filteredScales.Add(regionScales(k))
                         End If
                     End If
                 Next
 
                 seeds = filteredSeeds
                 regionStyleKeys = filteredKeys
+                regionScales = filteredScales
             Next
 
             Dim cells = VoronoiEngine.BuildCells(seeds, d.Outer, d.Holes)
@@ -494,26 +604,85 @@ Public Class MainForm
             allSeeds.AddRange(seeds)
             allCells.AddRange(cells)
             allStyleKeys.AddRange(regionStyleKeys)
+            allScales.AddRange(regionScales)
         Next
 
         currentSeeds = allSeeds
         currentSeedStyleKeys = allStyleKeys
+        currentSeedCellScales = allScales
 
         canvas.Cells = allCells
         canvas.EditableSeeds = New List(Of Vec2)(allSeeds)
         canvas.SeedStyleKeys = New List(Of Integer)(currentSeedStyleKeys)
+        canvas.CellScales = New List(Of Single)(currentSeedCellScales)
 
         ApplyOptions()
         canvas.Invalidate()
     End Sub
 
+    'Private Sub Canvas_SeedsEdited(sender As Object, e As EventArgs)
+    '    currentSeeds = New List(Of Vec2)(canvas.EditableSeeds)
+    '    EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
+    '    BuildFromCurrentSeeds()
+    'End Sub
+
     Private Sub Canvas_SeedsEdited(sender As Object, e As EventArgs)
         currentSeeds = New List(Of Vec2)(canvas.EditableSeeds)
+        currentSeedCellScales = New List(Of Single)(canvas.CellScales)
+
         EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
+        EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
+
         BuildFromCurrentSeeds()
     End Sub
 
+    Private Sub Canvas_SeedScalesEdited(sender As Object, e As EventArgs)
+        currentSeedCellScales = New List(Of Single)(canvas.CellScales)
+        EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
+        canvas.CellScales = New List(Of Single)(currentSeedCellScales)
+        canvas.Invalidate()
+    End Sub
+
+    'Private Sub BuildFromCurrentSeeds()
+    '    If useSketchDomains AndAlso lockSketchViewDomain Then
+    '        canvas.Domain = currentWorldDomain
+    '    Else
+    '        canvas.Domain = domain
+    '    End If
+
+    '    If useSketchDomains AndAlso currentSketchDomains IsNot Nothing AndAlso currentSketchDomains.Count > 0 Then
+    '        Dim allCells As New List(Of VoronoiCell)
+    '        Dim allSeeds As New List(Of Vec2)
+
+    '        For Each d In currentSketchDomains
+    '            Dim seedsInDomain = FilterSeedsInsideDomain(currentSeeds, d)
+    '            If seedsInDomain.Count = 0 Then Continue For
+
+    '            Dim cells = VoronoiEngine.BuildCells(seedsInDomain, d.Outer, d.Holes)
+    '            allSeeds.AddRange(seedsInDomain)
+    '            allCells.AddRange(cells)
+    '        Next
+
+    '        currentSeeds = allSeeds
+    '        canvas.Cells = allCells
+    '        canvas.EditableSeeds = New List(Of Vec2)(allSeeds)
+
+    '    Else
+    '        Dim cells = VoronoiEngine.BuildCells(currentSeeds, domain)
+    '        canvas.Cells = cells
+    '        canvas.EditableSeeds = New List(Of Vec2)(currentSeeds)
+    '    End If
+
+    '    canvas.SeedStyleKeys = New List(Of Integer)(currentSeedStyleKeys)
+
+    '    ApplyOptions()
+    '    canvas.Invalidate()
+    'End Sub
+
     Private Sub BuildFromCurrentSeeds()
+        EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
+        EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
+
         If useSketchDomains AndAlso lockSketchViewDomain Then
             canvas.Domain = currentWorldDomain
         Else
@@ -523,27 +692,57 @@ Public Class MainForm
         If useSketchDomains AndAlso currentSketchDomains IsNot Nothing AndAlso currentSketchDomains.Count > 0 Then
             Dim allCells As New List(Of VoronoiCell)
             Dim allSeeds As New List(Of Vec2)
+            Dim allStyleKeys As New List(Of Integer)
+            Dim allScales As New List(Of Single)
 
             For Each d In currentSketchDomains
-                Dim seedsInDomain = FilterSeedsInsideDomain(currentSeeds, d)
+                Dim seedsInDomain As New List(Of Vec2)
+                Dim keysInDomain As New List(Of Integer)
+                Dim scalesInDomain As New List(Of Single)
+
+                For i As Integer = 0 To currentSeeds.Count - 1
+                    If Geo2D.PointInPolygonWithHoles(currentSeeds(i), d.Outer, d.Holes) Then
+                        seedsInDomain.Add(currentSeeds(i))
+
+                        If i < currentSeedStyleKeys.Count Then
+                            keysInDomain.Add(currentSeedStyleKeys(i))
+                        End If
+
+                        If i < currentSeedCellScales.Count Then
+                            scalesInDomain.Add(currentSeedCellScales(i))
+                        Else
+                            scalesInDomain.Add(CSng(numCellScale.Value))
+                        End If
+                    End If
+                Next
+
                 If seedsInDomain.Count = 0 Then Continue For
 
                 Dim cells = VoronoiEngine.BuildCells(seedsInDomain, d.Outer, d.Holes)
+
                 allSeeds.AddRange(seedsInDomain)
+                allStyleKeys.AddRange(keysInDomain)
+                allScales.AddRange(scalesInDomain)
                 allCells.AddRange(cells)
             Next
 
             currentSeeds = allSeeds
+            currentSeedStyleKeys = allStyleKeys
+            currentSeedCellScales = allScales
+
             canvas.Cells = allCells
             canvas.EditableSeeds = New List(Of Vec2)(allSeeds)
-
         Else
             Dim cells = VoronoiEngine.BuildCells(currentSeeds, domain)
             canvas.Cells = cells
             canvas.EditableSeeds = New List(Of Vec2)(currentSeeds)
         End If
 
+        EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
+        EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
+
         canvas.SeedStyleKeys = New List(Of Integer)(currentSeedStyleKeys)
+        canvas.CellScales = New List(Of Single)(currentSeedCellScales)
 
         ApplyOptions()
         canvas.Invalidate()
@@ -563,7 +762,16 @@ Public Class MainForm
         Return result
     End Function
 
+    'Private Sub RefreshCanvasOptions(sender As Object, e As EventArgs)
+    '    ApplyOptions()
+    '    canvas.Invalidate()
+    'End Sub
+
     Private Sub RefreshCanvasOptions(sender As Object, e As EventArgs)
+        If sender Is numCellScale Then
+            SetAllSeedCellScales(CSng(numCellScale.Value))
+        End If
+
         ApplyOptions()
         canvas.Invalidate()
     End Sub
@@ -638,6 +846,9 @@ Public Class MainForm
 
             currentSketchBoundaries = New List(Of List(Of Vec2))()
             currentSketchDomains = New List(Of SketchDomainRegion)()
+
+            currentSeedCellScales = New List(Of Single)()
+            canvas.CellScales = New List(Of Single)()
 
             Dim holeFlags As New List(Of Boolean)
             Dim loopIndexMap As New Dictionary(Of Integer, SolidEdgeExporter.SketchBoundaryLoop)
@@ -906,6 +1117,46 @@ Public Class MainForm
 
     Private Sub GenerationParameterChanged(sender As Object, e As EventArgs)
         GenerateRandomDiagram(sender, e)
+    End Sub
+
+    Private Sub RebuildSeedCellScales(count As Integer, defaultScale As Single)
+        currentSeedCellScales = New List(Of Single)(count)
+
+        For i As Integer = 0 To count - 1
+            currentSeedCellScales.Add(defaultScale)
+        Next
+    End Sub
+
+    Private Sub EnsureSeedCellScaleCount(count As Integer, defaultScale As Single)
+        If currentSeedCellScales Is Nothing Then
+            currentSeedCellScales = New List(Of Single)()
+        End If
+
+        While currentSeedCellScales.Count < count
+            currentSeedCellScales.Add(defaultScale)
+        End While
+
+        While currentSeedCellScales.Count > count
+            currentSeedCellScales.RemoveAt(currentSeedCellScales.Count - 1)
+        End While
+
+        For i As Integer = 0 To currentSeedCellScales.Count - 1
+            currentSeedCellScales(i) = CSng(Math.Max(0.05F, Math.Min(1.5F, currentSeedCellScales(i))))
+        Next
+    End Sub
+
+    Private Sub SetAllSeedCellScales(scale As Single)
+        If currentSeeds Is Nothing Then
+            currentSeeds = New List(Of Vec2)()
+        End If
+
+        EnsureSeedCellScaleCount(currentSeeds.Count, scale)
+
+        For i As Integer = 0 To currentSeedCellScales.Count - 1
+            currentSeedCellScales(i) = scale
+        Next
+
+        canvas.CellScales = New List(Of Single)(currentSeedCellScales)
     End Sub
 
 End Class
