@@ -18,6 +18,7 @@ Public Enum CellRenderStyle
     Pentagon
     Hexagon
     Octagon
+    BlockSymbol
 End Enum
 
 Public Enum InnerCornerStyle
@@ -44,6 +45,8 @@ Public Class VoronoiCanvas
 
     Public Property SketchDomains As New List(Of CanvasSketchDomain)
     Public Property ConstrainSeedsToSketchDomains As Boolean = False
+
+    Public Property BlockSymbolLoops As New List(Of List(Of Vec2))
 
     Private Structure ViewInfo
         Public Scale As Single
@@ -227,7 +230,7 @@ Public Class VoronoiCanvas
                             g.DrawPolygon(Pens.DimGray, outerPts)
                         End If
 
-                        Using path As GraphicsPath = BuildSymbolPath(cell, view, effectiveStyle, CellScale, RandomRotation)
+                        Using path As GraphicsPath = BuildSymbolPath(cell, view, effectiveStyle, CellScale, RandomRotation, i)
                             If path IsNot Nothing Then
                                 Using symbolPen As New Pen(GetCellColor(i, 240), InnerCurveWidth)
                                     symbolPen.LineJoin = LineJoin.Round
@@ -246,7 +249,7 @@ Public Class VoronoiCanvas
                                      view As ViewInfo,
                                      style As CellRenderStyle,
                                      scaleFactor As Single,
-                                     randomRotation As Boolean) As GraphicsPath
+                                     randomRotation As Boolean, cellIndex As Integer) As GraphicsPath
 
         If cell Is Nothing OrElse cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Return Nothing
 
@@ -256,9 +259,14 @@ Public Class VoronoiCanvas
 
         radius *= Math.Max(0.05, Math.Min(1.5, scaleFactor))
 
+        'Dim angle As Double = 0.0
+        'If randomRotation Then
+        '    angle = GetStableAngleFromSeed(cell.Seed)
+        'End If
+
         Dim angle As Double = 0.0
         If randomRotation Then
-            angle = GetStableAngleFromSeed(cell.Seed)
+            angle = GetStableAngleFromKey(cellIndex)
         End If
 
         Dim center As PointF = WorldToScreen(c, view)
@@ -294,9 +302,58 @@ Public Class VoronoiCanvas
             Case CellRenderStyle.Star4
                 Return BuildCorneredSymbolPath(BuildStarPoints(center, radiusPx, 4, 0.45F, angle - Math.PI / 4.0))
 
+            Case CellRenderStyle.BlockSymbol
+                Return BuildBlockSymbolPath(center, radiusPx, angle)
+
             Case Else
                 Return Nothing
         End Select
+    End Function
+
+    Private Function GetStableAngleFromKey(cellIndex As Integer) As Double
+        Dim key As Integer = 0
+        If SeedStyleKeys IsNot Nothing AndAlso cellIndex >= 0 AndAlso cellIndex < SeedStyleKeys.Count Then
+            key = SeedStyleKeys(cellIndex)
+        End If
+
+        Dim v As Double = Math.Abs(key * 0.61803398875)
+        Dim frac As Double = v - Math.Floor(v)
+        Return frac * Math.PI * 2.0
+    End Function
+
+    Private Function BuildBlockSymbolPath(center As PointF,
+                                      radiusPx As Single,
+                                      angle As Double) As GraphicsPath
+
+        If BlockSymbolLoops Is Nothing OrElse BlockSymbolLoops.Count = 0 Then Return Nothing
+
+        Dim path As New GraphicsPath()
+        Dim cosA As Double = Math.Cos(angle)
+        Dim sinA As Double = Math.Sin(angle)
+
+        For Each loopPts In BlockSymbolLoops
+            If loopPts Is Nothing OrElse loopPts.Count < 2 Then Continue For
+
+            Dim pts As New List(Of PointF)
+            For Each p In loopPts
+                Dim rx As Double = p.X * cosA - p.Y * sinA
+                Dim ry As Double = p.X * sinA + p.Y * cosA
+
+                pts.Add(New PointF(
+                center.X + CSng(rx * radiusPx),
+                center.Y + CSng(ry * radiusPx)
+            ))
+            Next
+
+            If pts.Count >= 3 Then
+                path.AddPolygon(pts.ToArray())
+            ElseIf pts.Count = 2 Then
+                path.StartFigure()
+                path.AddLine(pts(0), pts(1))
+            End If
+        Next
+
+        Return path
     End Function
 
     Private Function BuildCorneredSymbolPath(points As List(Of PointF)) As GraphicsPath
@@ -363,11 +420,11 @@ Public Class VoronoiCanvas
         Return pts
     End Function
 
-    Private Function GetStableAngleFromSeed(seed As Vec2) As Double
-        Dim v = Math.Abs(seed.X * 12.9898 + seed.Y * 78.233)
-        Dim frac = v - Math.Floor(v)
-        Return frac * Math.PI * 2.0
-    End Function
+    'Private Function GetStableAngleFromSeed(seed As Vec2) As Double
+    '    Dim v = Math.Abs(seed.X * 12.9898 + seed.Y * 78.233)
+    '    Dim frac = v - Math.Floor(v)
+    '    Return frac * Math.PI * 2.0
+    'End Function
 
     Private Function GetInscribedRadius(vertices As List(Of Vec2), c As Vec2) As Double
         Dim minDist As Double = Double.MaxValue

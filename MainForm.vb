@@ -45,6 +45,8 @@ Public Class MainForm
     Private ReadOnly btnToSolidEdge As New Button()
 
     Private ReadOnly btnReadSketchProfile As New Button()
+    Private ReadOnly btnReadBlockDefaultView As New Button()
+    Private currentBlockSymbolLoops As New List(Of List(Of Vec2))()
 
     Private ReadOnly domain As RectangleF = New RectangleF(0, 0, 1000, 700)
     Private currentWorldDomain As RectangleF
@@ -88,6 +90,7 @@ Public Class MainForm
         AddHandler btnGenerate.Click, AddressOf GenerateRandomDiagram
         AddHandler btnShuffle.Click, AddressOf ShuffleSeed
         AddHandler btnReadSketchProfile.Click, AddressOf ReadSketchProfile_Click
+        AddHandler btnReadBlockDefaultView.Click, AddressOf ReadBlockDefaultView_Click
 
         AddHandler btnExportSvg.Click, AddressOf ExportSvg_Click
         AddHandler btnExportDxf.Click, AddressOf ExportDxf_Click
@@ -170,6 +173,7 @@ Public Class MainForm
 
         AddRowTitle("Sketch")
         AddRowControl(btnReadSketchProfile, 30)
+        AddRowControl(btnReadBlockDefaultView, 30)
 
         AddRowTitle("Export")
         AddRowControl(btnExportSvg, 30)
@@ -375,6 +379,12 @@ Public Class MainForm
         btnReadSketchProfile.BackColor = Color.White
         btnReadSketchProfile.ForeColor = Color.FromArgb(30, 40, 55)
         btnReadSketchProfile.FlatStyle = FlatStyle.Flat
+
+        btnReadBlockDefaultView.Text = "Read Solid Edge Block"
+        btnReadBlockDefaultView.UseVisualStyleBackColor = False
+        btnReadBlockDefaultView.BackColor = Color.White
+        btnReadBlockDefaultView.ForeColor = Color.FromArgb(30, 40, 55)
+        btnReadBlockDefaultView.FlatStyle = FlatStyle.Flat
 
         btnExportSvg.Text = "Export SVG"
         btnExportSvg.UseVisualStyleBackColor = False
@@ -689,6 +699,87 @@ Public Class MainForm
         End Try
     End Sub
 
+
+
+    Private Function NormalizeBlockLoops(loops As List(Of SolidEdgeExporter.SketchBoundaryLoop),
+                                     bounds As RectangleF) As List(Of List(Of Vec2))
+
+        Dim result As New List(Of List(Of Vec2))()
+        If loops Is Nothing OrElse loops.Count = 0 Then Return result
+
+        Dim cx As Double = bounds.Left + bounds.Width / 2.0
+        Dim cy As Double = bounds.Top + bounds.Height / 2.0
+
+        Dim maxR As Double = 0.0
+        For Each lp In loops
+            If lp Is Nothing OrElse lp.Points Is Nothing Then Continue For
+            For Each p In lp.Points
+                Dim dx = p.X - cx
+                Dim dy = p.Y - cy
+                Dim rr = Math.Sqrt(dx * dx + dy * dy)
+                If rr > maxR Then maxR = rr
+            Next
+        Next
+
+        If maxR <= 0.000001 Then Return result
+
+        For Each lp In loops
+            If lp Is Nothing OrElse lp.Points Is Nothing OrElse lp.Points.Count < 2 Then Continue For
+
+            Dim pts As New List(Of Vec2)
+            For Each p In lp.Points
+                pts.Add(New Vec2((p.X - cx) / maxR, (p.Y - cy) / maxR))
+            Next
+
+            If pts.Count >= 2 Then result.Add(pts)
+        Next
+
+        Return result
+    End Function
+
+
+    Private Sub ReadBlockDefaultView_Click(sender As Object, e As EventArgs)
+        Try
+            Dim loops As List(Of SolidEdgeExporter.SketchBoundaryLoop) = Nothing
+            Dim bounds As RectangleF = RectangleF.Empty
+            Dim err As String = Nothing
+
+            If Not SolidEdgeExporter.TryReadBlockDefaultViewBoundaries(loops, bounds, err) Then
+                MessageBox.Show(err,
+                            "Reading profile from Solid Edge block",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning)
+                Return
+            End If
+
+            If loops Is Nothing OrElse loops.Count = 0 Then
+                MessageBox.Show("No loops found in the block.",
+                            "Reading profile from Solid Edge block",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning)
+                Return
+            End If
+
+            currentBlockSymbolLoops = NormalizeBlockLoops(loops, bounds)
+            canvas.BlockSymbolLoops = currentBlockSymbolLoops _
+            .Select(Function(lp) New List(Of Vec2)(lp)).ToList()
+
+            cmbStyle.SelectedItem = CellRenderStyle.BlockSymbol.ToString()
+            ApplyOptions()
+            canvas.Invalidate()
+
+            MessageBox.Show("Block geometry loaded as cell symbol.",
+                        "Solid Edge block",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information)
+
+        Catch ex As Exception
+            MessageBox.Show("Error while reading the block: " & ex.Message,
+                        "Solid Edge block",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error)
+        End Try
+    End Sub
     Private Function ConvertToCanvasDomains(domains As List(Of SketchDomainRegion)) As List(Of CanvasSketchDomain)
         Dim result As New List(Of CanvasSketchDomain)
 
