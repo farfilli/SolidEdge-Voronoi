@@ -19,17 +19,13 @@ Public Class MainForm
     Private ReadOnly numRelax As New NumericUpDown()
 
     Private ReadOnly cmbStyle As New ComboBox()
-    Private ReadOnly cmbInnerCorner As New ComboBox()
-    Private ReadOnly cmbSymbolCorner As New ComboBox()
+    Private ReadOnly cmbVertexMode As New ComboBox()
 
     Private ReadOnly numCellScale As New NumericUpDown()
 
     Private ReadOnly numInnerOffset As New NumericUpDown()
-    Private ReadOnly numCornerTrim As New NumericUpDown()
-    Private ReadOnly numBezierBulge As New NumericUpDown()
+    Private ReadOnly numVertexTrim As New NumericUpDown()
     Private ReadOnly numCurveWidth As New NumericUpDown()
-    Private ReadOnly numSymbolCornerTrim As New NumericUpDown()
-    Private ReadOnly numSymbolBezierBulge As New NumericUpDown()
 
     Private ReadOnly chkFill As New CheckBox()
     Private ReadOnly chkOuter As New CheckBox()
@@ -104,16 +100,12 @@ Public Class MainForm
         AddHandler chkRandomRotation.CheckedChanged, AddressOf RefreshCanvasOptions
 
         AddHandler cmbStyle.SelectedIndexChanged, AddressOf RefreshCanvasOptions
-        AddHandler cmbInnerCorner.SelectedIndexChanged, AddressOf RefreshCanvasOptions
-        AddHandler cmbSymbolCorner.SelectedIndexChanged, AddressOf RefreshCanvasOptions
+        AddHandler cmbVertexMode.SelectedIndexChanged, AddressOf RefreshCanvasOptions
 
         AddHandler numCellScale.ValueChanged, AddressOf RefreshCanvasOptions
         AddHandler numInnerOffset.ValueChanged, AddressOf RefreshCanvasOptions
-        AddHandler numCornerTrim.ValueChanged, AddressOf RefreshCanvasOptions
-        AddHandler numBezierBulge.ValueChanged, AddressOf RefreshCanvasOptions
+        AddHandler numVertexTrim.ValueChanged, AddressOf RefreshCanvasOptions
         AddHandler numCurveWidth.ValueChanged, AddressOf RefreshCanvasOptions
-        AddHandler numSymbolCornerTrim.ValueChanged, AddressOf RefreshCanvasOptions
-        AddHandler numSymbolBezierBulge.ValueChanged, AddressOf RefreshCanvasOptions
 
         AddHandler canvas.SeedsEdited, AddressOf Canvas_SeedsEdited
         AddHandler canvas.SeedScalesEdited, AddressOf Canvas_SeedScalesEdited
@@ -146,8 +138,8 @@ Public Class MainForm
         AddRowTitle("Cell Style")
         AddRowControl(cmbStyle)
 
-        AddDoubleRow("Corner Mode (Inner)", cmbInnerCorner,
-             "Corner Mode (Symbols)", cmbSymbolCorner)
+        AddDoubleRow("Modalità vertice", cmbVertexMode,
+             "Dimensione vertice", numVertexTrim)
 
         AddDoubleRow("Cell Count", numCells,
              "Random Seed", numSeed)
@@ -156,12 +148,6 @@ Public Class MainForm
              "Cell Scale", numCellScale)
 
         AddDoubleRow("Inner Offset", numInnerOffset,
-             "Inner Trim", numCornerTrim)
-
-        AddDoubleRow("Inner Bezier Bulge", numBezierBulge,
-             "Symbol Trim", numSymbolCornerTrim)
-
-        AddDoubleRow("Symbol Bezier Bulge", numSymbolBezierBulge,
              "Curve Width", numCurveWidth)
 
         AddRowControl(chkFill)
@@ -276,13 +262,9 @@ Public Class MainForm
         cmbStyle.Items.AddRange([Enum].GetNames(GetType(CellRenderStyle)))
         cmbStyle.SelectedItem = CellRenderStyle.Curved.ToString()
 
-        cmbInnerCorner.DropDownStyle = ComboBoxStyle.DropDownList
-        cmbInnerCorner.Items.AddRange([Enum].GetNames(GetType(InnerCornerStyle)))
-        cmbInnerCorner.SelectedItem = InnerCornerStyle.Bezier.ToString()
-
-        cmbSymbolCorner.DropDownStyle = ComboBoxStyle.DropDownList
-        cmbSymbolCorner.Items.AddRange([Enum].GetNames(GetType(SymbolCornerStyle)))
-        cmbSymbolCorner.SelectedItem = SymbolCornerStyle.Sharp.ToString()
+        cmbVertexMode.DropDownStyle = ComboBoxStyle.DropDownList
+        cmbVertexMode.Items.AddRange(New String() {"Spigolo vivo", "Raggiatura con arco", "Curva spline"})
+        cmbVertexMode.SelectedIndex = 2
 
         numCells.Minimum = 5
         numCells.Maximum = 500
@@ -308,29 +290,11 @@ Public Class MainForm
         numInnerOffset.Increment = 1D
         numInnerOffset.Value = 0D
 
-        numCornerTrim.Minimum = 0D
-        numCornerTrim.Maximum = 3D
-        numCornerTrim.DecimalPlaces = 2
-        numCornerTrim.Increment = 0.05D
-        numCornerTrim.Value = 0.22D
-
-        numBezierBulge.Minimum = 0D
-        numBezierBulge.Maximum = 3D
-        numBezierBulge.DecimalPlaces = 2
-        numBezierBulge.Increment = 0.05D
-        numBezierBulge.Value = 0.55D
-
-        numSymbolCornerTrim.Minimum = 0D
-        numSymbolCornerTrim.Maximum = 3D
-        numSymbolCornerTrim.DecimalPlaces = 2
-        numSymbolCornerTrim.Increment = 0.05D
-        numSymbolCornerTrim.Value = 0.18D
-
-        numSymbolBezierBulge.Minimum = 0D
-        numSymbolBezierBulge.Maximum = 3D
-        numSymbolBezierBulge.DecimalPlaces = 2
-        numSymbolBezierBulge.Increment = 0.05D
-        numSymbolBezierBulge.Value = 0.55D
+        numVertexTrim.Minimum = 0D
+        numVertexTrim.Maximum = 3D
+        numVertexTrim.DecimalPlaces = 2
+        numVertexTrim.Increment = 0.05D
+        numVertexTrim.Value = 0.22D
 
         numCurveWidth.Minimum = 1D
         numCurveWidth.Maximum = 12D
@@ -784,33 +748,39 @@ Public Class MainForm
         canvas.RandomRotation = chkRandomRotation.Checked
 
         canvas.RenderStyle = CType([Enum].Parse(GetType(CellRenderStyle), cmbStyle.SelectedItem.ToString()), CellRenderStyle)
-        canvas.InnerCornerMode = CType([Enum].Parse(GetType(InnerCornerStyle), cmbInnerCorner.SelectedItem.ToString()), InnerCornerStyle)
-        canvas.SymbolCornerMode = CType([Enum].Parse(GetType(SymbolCornerStyle), cmbSymbolCorner.SelectedItem.ToString()), SymbolCornerStyle)
+        canvas.VertexMode = VertexModeFromUi()
 
         canvas.CellScale = CSng(numCellScale.Value)
         canvas.InnerOffset = CSng(numInnerOffset.Value)
-        canvas.CornerTrim = CSng(numCornerTrim.Value)
-        canvas.BezierBulge = CSng(numBezierBulge.Value)
-        canvas.SymbolCornerTrim = CSng(numSymbolCornerTrim.Value)
-        canvas.SymbolBezierBulge = CSng(numSymbolBezierBulge.Value)
+        canvas.VertexTrim = CSng(numVertexTrim.Value)
         canvas.InnerCurveWidth = CSng(numCurveWidth.Value)
 
         Dim isCurved As Boolean = (canvas.RenderStyle = CellRenderStyle.Curved)
         Dim isSymbol As Boolean = canvas.RenderStyle <> CellRenderStyle.Curved AndAlso canvas.RenderStyle <> CellRenderStyle.Straight
-        Dim isSymbolBezier As Boolean = (canvas.SymbolCornerMode = SymbolCornerStyle.Bezier)
+        Dim usesVertices As Boolean = isCurved OrElse isSymbol
 
-        cmbInnerCorner.Enabled = isCurved
+        ' Lo spigolo vivo non usa la dimensione; arco e spline si'.
+        Dim usesVertexSize As Boolean = usesVertices AndAlso canvas.VertexMode <> SymbolCornerStyle.Sharp
+
+        cmbVertexMode.Enabled = usesVertices
+        numVertexTrim.Enabled = usesVertexSize
         numInnerOffset.Enabled = isCurved
-        numCornerTrim.Enabled = isCurved
-        numBezierBulge.Enabled = isCurved AndAlso canvas.InnerCornerMode = InnerCornerStyle.Bezier
         chkInner.Enabled = isCurved
 
-        cmbSymbolCorner.Enabled = isSymbol
         numCellScale.Enabled = isSymbol
         chkRandomRotation.Enabled = isSymbol
-        numSymbolCornerTrim.Enabled = isSymbol AndAlso canvas.SymbolCornerMode <> SymbolCornerStyle.Sharp
-        numSymbolBezierBulge.Enabled = isSymbol AndAlso isSymbolBezier
     End Sub
+
+    Private Function VertexModeFromUi() As SymbolCornerStyle
+        Select Case cmbVertexMode.SelectedIndex
+            Case 1
+                Return SymbolCornerStyle.FilletArc
+            Case 2
+                Return SymbolCornerStyle.Bezier
+            Case Else
+                Return SymbolCornerStyle.Sharp
+        End Select
+    End Function
 
     Private Sub ReadSketchProfile_Click(sender As Object, e As EventArgs)
         Try

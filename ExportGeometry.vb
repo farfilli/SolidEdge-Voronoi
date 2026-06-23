@@ -82,6 +82,18 @@ Public Class ExportPath2D
     Public Property FillColor As Color = Color.Transparent
 End Class
 
+' Risultato della generazione UNICA della geometria per una singola cella.
+' Tiene insieme l'indice di cella (per i colori), la cella d'origine (per fill
+' e bordo nel canvas), lo stile effettivo (per scegliere penna e gate
+' ShowInnerCurve) e i path stilizzati in world-space. La maggior parte degli
+' stili produce un solo path; BlockSymbol puo' produrne piu' d'uno.
+Public Class CellGeometry
+    Public Property CellIndex As Integer
+    Public Property Cell As VoronoiCell
+    Public Property EffectiveStyle As CellRenderStyle
+    Public Property StyledPaths As New List(Of ExportPath2D)
+End Class
+
 Public Module ExportGeometry
 
     'Public Function BuildExportPaths(canvas As VoronoiCanvas) As List(Of ExportPath2D)
@@ -164,82 +176,105 @@ Public Module ExportGeometry
     'End Function
 
 
-    Public Function BuildExportPaths(canvas As VoronoiCanvas) As List(Of ExportPath2D)
-        Dim result As New List(Of ExportPath2D)
+    ' ====================================================================
+    ' GENERAZIONE UNICA DELLA GEOMETRIA (world-space).
+    ' Sia il canvas (preview) sia gli exporter consumano questo risultato.
+    ' L'indice di cella usato per stile/scala/angolo/colore e' l'indice di
+    ' loop grezzo su canvas.Cells: coincide con quello usato dal canvas per
+    ' il fill e per CellScales/SeedStyleKeys, cosi' preview ed export restano
+    ' allineati anche in presenza di celle degeneri saltate.
+    ' ====================================================================
+    Public Function BuildCellGeometry(canvas As VoronoiCanvas) As List(Of CellGeometry)
+        Dim result As New List(Of CellGeometry)
         If canvas Is Nothing OrElse canvas.Cells Is Nothing Then Return result
 
-        Dim cellIndex As Integer = 0
-
-        For Each cell In canvas.Cells
+        For cellIndex As Integer = 0 To canvas.Cells.Count - 1
+            Dim cell = canvas.Cells(cellIndex)
             If cell Is Nothing OrElse cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Continue For
 
-            Dim p As ExportPath2D = Nothing
             Dim effectiveStyle As CellRenderStyle = GetEffectiveRenderStyle(canvas, cellIndex)
             Dim effectiveScale As Single = GetEffectiveCellScale(canvas, cellIndex)
 
+            Dim paths As New List(Of ExportPath2D)
+
             Select Case effectiveStyle
                 Case CellRenderStyle.Straight
-                    p = BuildStraightCellPath(cell)
+                    paths.Add(BuildStraightCellPath(cell))
 
                 Case CellRenderStyle.Curved
-                    If canvas.InnerCornerMode = InnerCornerStyle.Arc Then
-                        p = BuildInnerArcCellPath(cell, canvas.InnerOffset, canvas.CornerTrim)
-                    Else
-                        p = BuildInnerBezierCellPath(cell, canvas.InnerOffset, canvas.CornerTrim, canvas.BezierBulge)
-                    End If
+                    Select Case canvas.VertexMode
+                        Case SymbolCornerStyle.FilletArc
+                            paths.Add(BuildInnerArcCellPath(cell, canvas.InnerOffset, canvas.VertexTrim))
+                        Case SymbolCornerStyle.Bezier
+                            paths.Add(BuildInnerBezierCellPath(cell, canvas.InnerOffset, canvas.VertexTrim, canvas.VertexSplineBulge))
+                        Case Else ' Sharp
+                            paths.Add(BuildInnerSharpCellPath(cell, canvas.InnerOffset))
+                    End Select
 
                 Case CellRenderStyle.Circle
-                    p = BuildCircleAsArcPath(cell, effectiveScale)
+                    paths.Add(BuildCircleAsArcPath(cell, effectiveScale))
 
                 Case CellRenderStyle.Square
-                    p = BuildPolygonSymbolPath(cell, effectiveScale, canvas.RandomRotation, 4, 0.0, 0.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
+                    paths.Add(BuildPolygonSymbolPath(cell, effectiveScale, canvas.RandomRotation, cellIndex, 4, 0.0, canvas.VertexMode, canvas.VertexTrim, canvas.VertexSplineBulge, canvas))
 
                 Case CellRenderStyle.RoundedSquare
-                    p = BuildPolygonSymbolPath(cell, effectiveScale, canvas.RandomRotation, 4, 0.0, 0.0, SymbolCornerStyle.FilletArc, Math.Max(canvas.SymbolCornerTrim, 0.18F), canvas.SymbolBezierBulge, canvas)
+                    paths.Add(BuildPolygonSymbolPath(cell, effectiveScale, canvas.RandomRotation, cellIndex, 4, 0.0, SymbolCornerStyle.FilletArc, Math.Max(canvas.VertexTrim, 0.18F), canvas.VertexSplineBulge, canvas))
 
                 Case CellRenderStyle.Triangle
-                    p = BuildPolygonSymbolPath(cell, effectiveScale, canvas.RandomRotation, 3, -Math.PI / 2.0, 0.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
+                    paths.Add(BuildPolygonSymbolPath(cell, effectiveScale, canvas.RandomRotation, cellIndex, 3, -Math.PI / 2.0, canvas.VertexMode, canvas.VertexTrim, canvas.VertexSplineBulge, canvas))
 
                 Case CellRenderStyle.Pentagon
-                    p = BuildPolygonSymbolPath(cell, effectiveScale, canvas.RandomRotation, 5, -Math.PI / 2.0, 0.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
+                    paths.Add(BuildPolygonSymbolPath(cell, effectiveScale, canvas.RandomRotation, cellIndex, 5, -Math.PI / 2.0, canvas.VertexMode, canvas.VertexTrim, canvas.VertexSplineBulge, canvas))
 
                 Case CellRenderStyle.Hexagon
-                    p = BuildPolygonSymbolPath(cell, effectiveScale, canvas.RandomRotation, 6, 0.0, 0.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
+                    paths.Add(BuildPolygonSymbolPath(cell, effectiveScale, canvas.RandomRotation, cellIndex, 6, 0.0, canvas.VertexMode, canvas.VertexTrim, canvas.VertexSplineBulge, canvas))
 
                 Case CellRenderStyle.Octagon
-                    p = BuildPolygonSymbolPath(cell, effectiveScale, canvas.RandomRotation, 8, 0.0, 0.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
+                    paths.Add(BuildPolygonSymbolPath(cell, effectiveScale, canvas.RandomRotation, cellIndex, 8, 0.0, canvas.VertexMode, canvas.VertexTrim, canvas.VertexSplineBulge, canvas))
 
                 Case CellRenderStyle.Star
-                    p = BuildStarSymbolPath(cell, effectiveScale, canvas.RandomRotation, 5, 0.46, -Math.PI / 2.0, 0.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
+                    paths.Add(BuildStarSymbolPath(cell, effectiveScale, canvas.RandomRotation, cellIndex, 5, 0.46, -Math.PI / 2.0, canvas.VertexMode, canvas.VertexTrim, canvas.VertexSplineBulge, canvas))
 
                 Case CellRenderStyle.Star3
-                    p = BuildStarSymbolPath(cell, effectiveScale, canvas.RandomRotation, 3, 0.3, -Math.PI / 2.0, 0.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
+                    paths.Add(BuildStarSymbolPath(cell, effectiveScale, canvas.RandomRotation, cellIndex, 3, 0.3, -Math.PI / 2.0, canvas.VertexMode, canvas.VertexTrim, canvas.VertexSplineBulge, canvas))
 
                 Case CellRenderStyle.Star4
-                    p = BuildStarSymbolPath(cell, effectiveScale, canvas.RandomRotation, 4, 0.45, -Math.PI / 4.0, 0.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
+                    paths.Add(BuildStarSymbolPath(cell, effectiveScale, canvas.RandomRotation, cellIndex, 4, 0.45, -Math.PI / 4.0, canvas.VertexMode, canvas.VertexTrim, canvas.VertexSplineBulge, canvas))
 
                 Case CellRenderStyle.BlockSymbol
                     Dim blockPaths = BuildBlockSymbolPaths(cell, canvas.BlockSymbolLoops, effectiveScale, canvas.RandomRotation, cellIndex, canvas)
-
-                    If blockPaths IsNot Nothing AndAlso blockPaths.Count > 0 Then
-                        For Each bp In blockPaths
-                            ApplyDefaultStyle(bp, canvas, cellIndex)
-                            result.Add(bp)
-                        Next
-
-                        cellIndex += 1
+                    If blockPaths IsNot Nothing Then
+                        paths.AddRange(blockPaths)
                     End If
-
-                    Continue For
             End Select
 
-            If p IsNot Nothing AndAlso p.Segments.Count > 0 Then
-                ApplyDefaultStyle(p, canvas, cellIndex)
-                result.Add(p)
-                cellIndex += 1
+            Dim cg As New CellGeometry With {
+                .CellIndex = cellIndex,
+                .Cell = cell,
+                .EffectiveStyle = effectiveStyle
+            }
+
+            For Each pth In paths
+                If pth IsNot Nothing AndAlso pth.Segments.Count > 0 Then
+                    ApplyDefaultStyle(pth, canvas, cellIndex)
+                    cg.StyledPaths.Add(pth)
+                End If
+            Next
+
+            If cg.StyledPaths.Count > 0 Then
+                result.Add(cg)
             End If
         Next
 
+        Return result
+    End Function
+
+    ' Proiettore per gli exporter: lista piatta dei soli path stilizzati.
+    Public Function BuildExportPaths(canvas As VoronoiCanvas) As List(Of ExportPath2D)
+        Dim result As New List(Of ExportPath2D)
+        For Each cg In BuildCellGeometry(canvas)
+            result.AddRange(cg.StyledPaths)
+        Next
         Return result
     End Function
 
@@ -413,9 +448,9 @@ Public Module ExportGeometry
 
         Select Case cornerMode
             Case SymbolCornerStyle.FilletArc
-                Return BuildFilletPathFromPolygon(pts, Math.Min(cornerTrim, 0.22F))
+                Return BuildFilletPathFromPolygon(pts, cornerTrim)
             Case SymbolCornerStyle.Bezier
-                Return BuildBezierPathFromPolygon(pts, Math.Min(cornerTrim, 0.22F), bezierBulge)
+                Return BuildBezierPathFromPolygon(pts, cornerTrim, bezierBulge)
             Case Else
                 Return BuildPathFromPolygon(pts)
         End Select
@@ -434,6 +469,13 @@ Public Module ExportGeometry
                                               bezierBulge As Single) As ExportPath2D
         Dim basePoly = GetInsetOrBasePolygon(cell.Vertices, insetWorld)
         Return BuildBezierPathFromPolygon(basePoly, cornerTrim, bezierBulge)
+    End Function
+
+    ' Contorno celle a spigolo vivo: poligono di offset senza raccordi.
+    Private Function BuildInnerSharpCellPath(cell As VoronoiCell,
+                                             insetWorld As Single) As ExportPath2D
+        Dim basePoly = GetInsetOrBasePolygon(cell.Vertices, insetWorld)
+        Return BuildPathFromPolygon(basePoly)
     End Function
 
     Private Function GetInsetOrBasePolygon(vertices As List(Of Vec2), insetWorld As Single) As List(Of Vec2)

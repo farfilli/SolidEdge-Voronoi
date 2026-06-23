@@ -81,6 +81,18 @@ Public Class VoronoiCanvas
     Public Property SymbolCornerTrim As Single = 0.18F
     Public Property SymbolBezierBulge As Single = 0.55F
 
+    ' --- Sistema vertici UNICO (sostituisce InnerCornerMode/SymbolCornerMode) ---
+    ' Una sola modalita' applicata sia ai simboli sia al contorno celle (Curved):
+    '   Sharp     = spigolo vivo
+    '   FilletArc = raggiatura con arco
+    '   Bezier    = curva spline
+    ' VertexTrim e' un fattore relativo al lato (come la vecchia trim); per la
+    ' spline indica quanto la curva parte lontano dallo spigolo. La bombatura
+    ' della spline e' fissa (VertexSplineBulge).
+    Public Property VertexMode As SymbolCornerStyle = SymbolCornerStyle.Bezier
+    Public Property VertexTrim As Single = 0.22F
+    Public Property VertexSplineBulge As Single = 0.55F
+
     Public Property SeedRadius As Single = 4.0F
     Public Property HitRadius As Single = 10.0F
 
@@ -261,6 +273,11 @@ Public Class VoronoiCanvas
 
         EnsureCellScaleCount(Cells.Count)
 
+        ' Geometria stilizzata dalla fonte UNICA (world-space): stesso
+        ' risultato che useranno gli exporter.
+        Dim geoms = ExportGeometry.BuildCellGeometry(Me)
+
+        ' Livello 1 + 2: fill e bordo esterno dal poligono grezzo della cella.
         Using outerPen As New Pen(Color.FromArgb(210, 180, 245, 240), 1.2F)
             For i As Integer = 0 To Cells.Count - 1
                 Dim cell = Cells(i)
@@ -277,55 +294,94 @@ Public Class VoronoiCanvas
                     End Using
                 End If
 
-                Dim effectiveStyle As CellRenderStyle = GetEffectiveRenderStyle(i)
-
-                Select Case effectiveStyle
-                    Case CellRenderStyle.Straight
-                        If ShowOuterEdges Then
-                            g.DrawPolygon(outerPen, outerPts)
-                        End If
-
-                    Case CellRenderStyle.Curved
-                        If ShowOuterEdges Then
-                            g.DrawPolygon(Pens.DimGray, outerPts)
-                        End If
-
-                        If ShowInnerCurve Then
-                            Using path As GraphicsPath = BuildInnerRoundedPath(cell.Vertices, view, InnerOffset, CornerTrim, BezierBulge)
-                                If path IsNot Nothing Then
-                                    Using innerPen As New Pen(GetCellColor(i, 235), InnerCurveWidth)
-                                        innerPen.LineJoin = LineJoin.Round
-                                        innerPen.StartCap = LineCap.Round
-                                        innerPen.EndCap = LineCap.Round
-                                        g.DrawPath(innerPen, path)
-                                    End Using
-                                End If
-                            End Using
-                        End If
-
-                    Case Else
-                        If ShowOuterEdges Then
-                            g.DrawPolygon(Pens.DimGray, outerPts)
-                        End If
-
-                        Using path As GraphicsPath = BuildSymbolPath(cell,
-                                                                 view,
-                                                                 effectiveStyle,
-                                                                 GetEffectiveCellScale(i),
-                                                                 RandomRotation,
-                                                                 i)
-                            If path IsNot Nothing Then
-                                Using symbolPen As New Pen(GetCellColor(i, 240), InnerCurveWidth)
-                                    symbolPen.LineJoin = LineJoin.Round
-                                    symbolPen.StartCap = LineCap.Round
-                                    symbolPen.EndCap = LineCap.Round
-                                    g.DrawPath(symbolPen, path)
-                                End Using
-                            End If
-                        End Using
-                End Select
+                If ShowOuterEdges Then
+                    If GetEffectiveRenderStyle(i) = CellRenderStyle.Straight Then
+                        g.DrawPolygon(outerPen, outerPts)
+                    Else
+                        g.DrawPolygon(Pens.DimGray, outerPts)
+                    End If
+                End If
             Next
         End Using
+
+        ' Livello 3: geometria stilizzata convertita in pixel.
+        ' Straight coincide col bordo gia' disegnato; Curved e' soggetto al
+        ' toggle ShowInnerCurve; i simboli sono sempre attivi.
+        For Each cg In geoms
+            If cg.EffectiveStyle = CellRenderStyle.Straight Then Continue For
+            If cg.EffectiveStyle = CellRenderStyle.Curved AndAlso Not ShowInnerCurve Then Continue For
+
+            For Each sp In cg.StyledPaths
+                Using path As GraphicsPath = ToScreenPath(sp, view)
+                    If path Is Nothing Then Continue For
+                    Using pen As New Pen(sp.StrokeColor, CSng(sp.StrokeWidth))
+                        pen.LineJoin = LineJoin.Round
+                        pen.StartCap = LineCap.Round
+                        pen.EndCap = LineCap.Round
+                        g.DrawPath(pen, path)
+                    End Using
+                End Using
+            Next
+        Next
+    End Sub
+
+    ' Converte un ExportPath2D world-space in un GraphicsPath in pixel.
+    Private Function ToScreenPath(wp As ExportPath2D, view As ViewInfo) As GraphicsPath
+        If wp Is Nothing OrElse wp.Segments Is Nothing OrElse wp.Segments.Count = 0 Then Return Nothing
+
+        Dim path As New GraphicsPath()
+        path.StartFigure()
+
+        For Each seg In wp.Segments
+            If TypeOf seg Is ExportLine2D Then
+                Dim ln = DirectCast(seg, ExportLine2D)
+                path.AddLine(WorldToScreen(ln.P1, view), WorldToScreen(ln.P2, view))
+
+            ElseIf TypeOf seg Is ExportCubicBezier2D Then
+                Dim bz = DirectCast(seg, ExportCubicBezier2D)
+                path.AddBezier(WorldToScreen(bz.P0, view),
+                               WorldToScreen(bz.C1, view),
+                               WorldToScreen(bz.C2, view),
+                               WorldToScreen(bz.P3, view))
+
+            ElseIf TypeOf seg Is ExportArc2D Then
+                AddWorldArc(path, DirectCast(seg, ExportArc2D), view)
+            End If
+        Next
+
+        If wp.Closed Then path.CloseFigure()
+        Return path
+    End Function
+
+    ' Disegna un arco world-space su GraphicsPath. Il centro e' noto dal
+    ' builder, quindi si traccia sempre l'arco minore (sweep normalizzato in
+    ' (-180, 180]): copre sia i fillet (angolo centrale < 180) sia i due
+    ' semicerchi del cerchio. Mondo e schermo hanno la stessa orientazione
+    ' (Y verso il basso, scala uniforme), quindi gli angoli si conservano.
+    Private Sub AddWorldArc(path As GraphicsPath, arc As ExportArc2D, view As ViewInfo)
+        Dim c = WorldToScreen(arc.Center, view)
+        Dim s = WorldToScreen(arc.StartPoint, view)
+        Dim ept = WorldToScreen(arc.EndPoint, view)
+        Dim rPx As Single = CSng(arc.Radius * view.Scale)
+
+        If rPx <= 0.01F Then
+            path.AddLine(s, ept)
+            Return
+        End If
+
+        Dim startAngle As Double = Math.Atan2(s.Y - c.Y, s.X - c.X) * 180.0 / Math.PI
+        Dim endAngle As Double = Math.Atan2(ept.Y - c.Y, ept.X - c.X) * 180.0 / Math.PI
+        Dim sweep As Double = endAngle - startAngle
+
+        While sweep <= -180.0
+            sweep += 360.0
+        End While
+        While sweep > 180.0
+            sweep -= 360.0
+        End While
+
+        Dim rect As New RectangleF(c.X - rPx, c.Y - rPx, rPx * 2.0F, rPx * 2.0F)
+        path.AddArc(rect, CSng(startAngle), CSng(sweep))
     End Sub
 
     'Private Function BuildSymbolPath(cell As VoronoiCell,
