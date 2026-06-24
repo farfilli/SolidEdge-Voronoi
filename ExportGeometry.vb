@@ -87,6 +87,15 @@ End Class
 ' e bordo nel canvas), lo stile effettivo (per scegliere penna e gate
 ' ShowInnerCurve) e i path stilizzati in world-space. La maggior parte degli
 ' stili produce un solo path; BlockSymbol puo' produrne piu' d'uno.
+' Definizione di un blocco importato da Solid Edge: nome (per ripiazzarlo come
+' occorrenza) + geometria nativa come entita' indipendenti (linee/archi/cerchi),
+' in spazio locale normalizzato attorno all'origine (~raggio 1). Ogni entita' e'
+' un ExportPath2D a se' (cosi' niente segmenti spuri di collegamento tra loop).
+Public Class BlockDefinition
+    Public Property Name As String = ""
+    Public Property Entities As New List(Of ExportPath2D)
+End Class
+
 Public Class CellGeometry
     Public Property CellIndex As Integer
     Public Property Cell As VoronoiCell
@@ -202,14 +211,16 @@ Public Module ExportGeometry
                     paths.Add(BuildStraightCellPath(cell))
 
                 Case CellRenderStyle.Curved
-                    Select Case canvas.VertexMode
-                        Case SymbolCornerStyle.FilletArc
-                            paths.Add(BuildInnerArcCellPath(cell, canvas.InnerOffset, canvas.VertexTrim))
-                        Case SymbolCornerStyle.Bezier
-                            paths.Add(BuildInnerBezierCellPath(cell, canvas.InnerOffset, canvas.VertexTrim, canvas.VertexSplineBulge))
-                        Case Else ' Sharp
-                            paths.Add(BuildInnerSharpCellPath(cell, canvas.InnerOffset))
-                    End Select
+                    For Each lp In GetInsetLoops(cell.Vertices, canvas.InnerOffset)
+                        Select Case canvas.VertexMode
+                            Case SymbolCornerStyle.FilletArc
+                                paths.Add(BuildFilletPathFromPolygon(lp, canvas.VertexTrim))
+                            Case SymbolCornerStyle.Bezier
+                                paths.Add(BuildBezierPathFromPolygon(lp, canvas.VertexTrim, canvas.VertexSplineBulge))
+                            Case Else ' Sharp
+                                paths.Add(BuildPathFromPolygon(lp))
+                        End Select
+                    Next
 
                 Case CellRenderStyle.Circle
                     paths.Add(BuildCircleAsArcPath(cell, effectiveScale))
@@ -242,7 +253,7 @@ Public Module ExportGeometry
                     paths.Add(BuildStarSymbolPath(cell, effectiveScale, canvas.RandomRotation, cellIndex, 4, 0.45, -Math.PI / 4.0, canvas.VertexMode, canvas.VertexTrim, canvas.VertexSplineBulge, canvas))
 
                 Case CellRenderStyle.BlockSymbol
-                    Dim blockPaths = BuildBlockSymbolPaths(cell, canvas.BlockSymbolLoops, effectiveScale, canvas.RandomRotation, cellIndex, canvas)
+                    Dim blockPaths = BuildBlockSymbolPaths(cell, canvas.BlockSymbols, effectiveScale, canvas.RandomRotation, cellIndex, canvas)
                     If blockPaths IsNot Nothing Then
                         paths.AddRange(blockPaths)
                     End If
@@ -291,7 +302,7 @@ Public Module ExportGeometry
     End Function
 
     Private Function BuildBlockSymbolPaths(cell As VoronoiCell,
-                                           normalizedLoops As List(Of List(Of Vec2)),
+                                           blocks As List(Of BlockDefinition),
                                            scaleFactor As Single,
                                            randomRotation As Boolean,
                                            cellIndex As Integer,
@@ -299,7 +310,11 @@ Public Module ExportGeometry
 
         Dim result As New List(Of ExportPath2D)()
         If cell Is Nothing OrElse cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Return result
-        If normalizedLoops Is Nothing OrElse normalizedLoops.Count = 0 Then Return result
+        If blocks Is Nothing OrElse blocks.Count = 0 Then Return result
+
+        ' Scelta stabile del blocco per questa cella (piazzamento casuale ma ripetibile).
+        Dim def As BlockDefinition = blocks(GetStableBlockIndex(canvas, cellIndex, blocks.Count))
+        If def Is Nothing OrElse def.Entities Is Nothing OrElse def.Entities.Count = 0 Then Return result
 
         Dim c As Vec2 = Geo2D.PolygonCentroid(cell.Vertices)
         Dim radius As Double = GetInscribedRadius(cell.Vertices, c)
@@ -311,31 +326,146 @@ Public Module ExportGeometry
         Dim cosA As Double = Math.Cos(angle)
         Dim sinA As Double = Math.Sin(angle)
 
-        For Each loopPts In normalizedLoops
-            If loopPts Is Nothing OrElse loopPts.Count < 2 Then Continue For
-
-            Dim worldPts As New List(Of Vec2)
-            For Each p In loopPts
-                Dim rx As Double = p.X * cosA - p.Y * sinA
-                Dim ry As Double = p.X * sinA + p.Y * cosA
-
-                worldPts.Add(New Vec2(
-                    c.X + rx * radius,
-                    c.Y + ry * radius
-                ))
-            Next
-
-            If worldPts.Count >= 3 Then
-                result.Add(BuildPathFromPolygon(worldPts))
-            ElseIf worldPts.Count = 2 Then
-                Dim p As New ExportPath2D()
-                p.Closed = False
-                p.Segments.Add(New ExportLine2D(worldPts(0), worldPts(1)))
-                result.Add(p)
-            End If
+        For Each entity In def.Entities
+            If entity Is Nothing OrElse entity.Segments Is Nothing OrElse entity.Segments.Count = 0 Then Continue For
+            Dim te = TransformBlockEntity(entity, c, radius, cosA, sinA)
+            If te.Segments.Count > 0 Then result.Add(te)
         Next
 
         Return result
+    End Function
+
+    ' Indice di blocco stabile per cella: usa la chiave per-seme se presente.
+    Private Function GetStableBlockIndex(canvas As VoronoiCanvas, cellIndex As Integer, count As Integer) As Integer
+        If count <= 1 Then Return 0
+
+        Dim key As Integer = cellIndex * 104729 + 17
+        If canvas IsNot Nothing AndAlso canvas.SeedStyleKeys IsNot Nothing _
+           AndAlso cellIndex >= 0 AndAlso cellIndex < canvas.SeedStyleKeys.Count Then
+            key = canvas.SeedStyleKeys(cellIndex)
+        End If
+
+        Return Math.Abs(key) Mod count
+    End Function
+
+    ' Trasforma un'entita' di blocco (spazio locale ~raggio 1) nello spazio mondo:
+    ' rotazione + scala (radius) + traslazione sul centro cella. Gli archi restano archi.
+    Private Function TransformBlockEntity(entity As ExportPath2D,
+                                          c As Vec2,
+                                          r As Double,
+                                          cosA As Double,
+                                          sinA As Double) As ExportPath2D
+        Dim outp As New ExportPath2D()
+        outp.Closed = entity.Closed
+
+        For Each seg In entity.Segments
+            If TypeOf seg Is ExportLine2D Then
+                Dim ln = DirectCast(seg, ExportLine2D)
+                outp.Segments.Add(New ExportLine2D(MapBlockPoint(ln.P1, c, r, cosA, sinA),
+                                                   MapBlockPoint(ln.P2, c, r, cosA, sinA)))
+
+            ElseIf TypeOf seg Is ExportArc2D Then
+                Dim a = DirectCast(seg, ExportArc2D)
+                outp.Segments.Add(New ExportArc2D(MapBlockPoint(a.Center, c, r, cosA, sinA),
+                                                  a.Radius * r,
+                                                  MapBlockPoint(a.StartPoint, c, r, cosA, sinA),
+                                                  MapBlockPoint(a.EndPoint, c, r, cosA, sinA),
+                                                  a.Clockwise))
+            End If
+        Next
+
+        Return outp
+    End Function
+
+    Private Function MapBlockPoint(p As Vec2, c As Vec2, r As Double, cosA As Double, sinA As Double) As Vec2
+        Dim rx As Double = p.X * cosA - p.Y * sinA
+        Dim ry As Double = p.X * sinA + p.Y * cosA
+        Return New Vec2(c.X + rx * r, c.Y + ry * r)
+    End Function
+
+    ' Normalizza in place una definizione di blocco attorno all'origine (~raggio 1),
+    ' cosi' che, moltiplicata per il raggio inscritto della cella, riempia la cella.
+    Public Sub NormalizeBlockInPlace(def As BlockDefinition)
+        If def Is Nothing OrElse def.Entities Is Nothing OrElse def.Entities.Count = 0 Then Return
+
+        Dim hasAny As Boolean = False
+        Dim minX As Double = 0.0, minY As Double = 0.0, maxX As Double = 0.0, maxY As Double = 0.0
+
+        For Each e In def.Entities
+            For Each seg In e.Segments
+                If TypeOf seg Is ExportLine2D Then
+                    Dim ln = DirectCast(seg, ExportLine2D)
+                    AccumulateBounds(ln.P1, hasAny, minX, minY, maxX, maxY)
+                    AccumulateBounds(ln.P2, hasAny, minX, minY, maxX, maxY)
+                ElseIf TypeOf seg Is ExportArc2D Then
+                    Dim a = DirectCast(seg, ExportArc2D)
+                    AccumulateBounds(New Vec2(a.Center.X - a.Radius, a.Center.Y - a.Radius), hasAny, minX, minY, maxX, maxY)
+                    AccumulateBounds(New Vec2(a.Center.X + a.Radius, a.Center.Y + a.Radius), hasAny, minX, minY, maxX, maxY)
+                End If
+            Next
+        Next
+
+        If Not hasAny Then Return
+
+        Dim cx As Double = (minX + maxX) / 2.0
+        Dim cy As Double = (minY + maxY) / 2.0
+
+        Dim maxR As Double = 0.0
+        For Each e In def.Entities
+            For Each seg In e.Segments
+                If TypeOf seg Is ExportLine2D Then
+                    Dim ln = DirectCast(seg, ExportLine2D)
+                    maxR = Math.Max(maxR, Math.Max(DistTo(ln.P1, cx, cy), DistTo(ln.P2, cx, cy)))
+                ElseIf TypeOf seg Is ExportArc2D Then
+                    Dim a = DirectCast(seg, ExportArc2D)
+                    maxR = Math.Max(maxR, DistTo(a.Center, cx, cy) + a.Radius)
+                End If
+            Next
+        Next
+
+        If maxR <= 0.000001 Then Return
+
+        For Each e In def.Entities
+            Dim ns As New List(Of ExportSegment2D)
+            For Each seg In e.Segments
+                If TypeOf seg Is ExportLine2D Then
+                    Dim ln = DirectCast(seg, ExportLine2D)
+                    ns.Add(New ExportLine2D(NormBlockPoint(ln.P1, cx, cy, maxR), NormBlockPoint(ln.P2, cx, cy, maxR)))
+                ElseIf TypeOf seg Is ExportArc2D Then
+                    Dim a = DirectCast(seg, ExportArc2D)
+                    ns.Add(New ExportArc2D(NormBlockPoint(a.Center, cx, cy, maxR),
+                                           a.Radius / maxR,
+                                           NormBlockPoint(a.StartPoint, cx, cy, maxR),
+                                           NormBlockPoint(a.EndPoint, cx, cy, maxR),
+                                           a.Clockwise))
+                End If
+            Next
+            e.Segments = ns
+        Next
+    End Sub
+
+    Private Sub AccumulateBounds(p As Vec2, ByRef hasAny As Boolean,
+                                 ByRef minX As Double, ByRef minY As Double,
+                                 ByRef maxX As Double, ByRef maxY As Double)
+        If Not hasAny Then
+            minX = p.X : maxX = p.X : minY = p.Y : maxY = p.Y
+            hasAny = True
+        Else
+            If p.X < minX Then minX = p.X
+            If p.X > maxX Then maxX = p.X
+            If p.Y < minY Then minY = p.Y
+            If p.Y > maxY Then maxY = p.Y
+        End If
+    End Sub
+
+    Private Function DistTo(p As Vec2, cx As Double, cy As Double) As Double
+        Dim dx = p.X - cx
+        Dim dy = p.Y - cy
+        Return Math.Sqrt(dx * dx + dy * dy)
+    End Function
+
+    Private Function NormBlockPoint(p As Vec2, cx As Double, cy As Double, maxR As Double) As Vec2
+        Return New Vec2((p.X - cx) / maxR, (p.Y - cy) / maxR)
     End Function
 
     Private Sub ApplyDefaultStyle(path As ExportPath2D, canvas As VoronoiCanvas, cellIndex As Integer)
@@ -476,6 +606,18 @@ Public Module ExportGeometry
                                              insetWorld As Single) As ExportPath2D
         Dim basePoly = GetInsetOrBasePolygon(cell.Vertices, insetWorld)
         Return BuildPathFromPolygon(basePoly)
+    End Function
+
+    ' Anelli di offset interno della cella, puliti (via Clipper).
+    ' Offset ~0 => poligono base. Puo' restituire piu' anelli o nessuno.
+    Private Function GetInsetLoops(vertices As List(Of Vec2), insetWorld As Single) As List(Of List(Of Vec2))
+        If vertices Is Nothing OrElse vertices.Count < 3 Then Return New List(Of List(Of Vec2))()
+
+        If insetWorld <= 0.0001F Then
+            Return New List(Of List(Of Vec2)) From {New List(Of Vec2)(vertices)}
+        End If
+
+        Return VoronoiEngine.OffsetPolygon(vertices, -CDbl(insetWorld))
     End Function
 
     Private Function GetInsetOrBasePolygon(vertices As List(Of Vec2), insetWorld As Single) As List(Of Vec2)

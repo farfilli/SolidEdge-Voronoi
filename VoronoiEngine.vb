@@ -199,6 +199,41 @@ Public Module VoronoiEngine
         Return pts
     End Function
 
+    ' Offset robusto di un poligono tramite Clipper.
+    ' delta < 0 = inset (rientro), delta > 0 = espansione. In world units.
+    ' Restituisce 0..N anelli puliti: niente auto-intersezioni, e se l'inset
+    ' "mangia" la cella il risultato e' vuoto (nessuno spigolo che sporge).
+    Public Function OffsetPolygon(poly As List(Of Vec2), delta As Double) As List(Of List(Of Vec2))
+        Dim result As New List(Of List(Of Vec2))
+        If poly Is Nothing OrElse poly.Count < 3 Then Return result
+
+        If Math.Abs(delta) < 0.0000001 Then
+            result.Add(New List(Of Vec2)(poly))
+            Return result
+        End If
+
+        ' Normalizzo a orientazione positiva: cosi' delta<0 = inset in modo affidabile.
+        Dim work As New List(Of Vec2)(poly)
+        If Geo2D.SignedArea(work) < 0.0 Then work.Reverse()
+
+        Dim subj As New Paths64 From {ToPath64(work)}
+
+        Dim solution As Paths64 = Clipper.InflatePaths(subj,
+                                                       delta * CLIP_SCALE,
+                                                       JoinType.Miter,
+                                                       EndType.Polygon)
+
+        If solution Is Nothing OrElse solution.Count = 0 Then Return result
+
+        For Each p As Path64 In solution
+            Dim v = ToVec2List(p)
+            v = Geo2D.RemoveDuplicateSequentialPoints(v)
+            If v.Count >= 3 Then result.Add(v)
+        Next
+
+        Return result
+    End Function
+
     Private Function CellNeedsHoleClip(cellPoly As List(Of Vec2),
                                    hole As List(Of Vec2),
                                    seed As Vec2) As Boolean

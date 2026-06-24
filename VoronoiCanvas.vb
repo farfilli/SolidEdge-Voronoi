@@ -48,6 +48,10 @@ Public Class VoronoiCanvas
 
     Public Property BlockSymbolLoops As New List(Of List(Of Vec2))
 
+    ' Blocchi importati da Solid Edge, come definizioni a primitive (linee/archi).
+    ' Lo stile BlockSymbol ne piazza uno per cella, scelto in modo stabile.
+    Public Property BlockSymbols As New List(Of BlockDefinition)
+
     Private Structure ViewInfo
         Public Scale As Single
         Public OffsetX As Single

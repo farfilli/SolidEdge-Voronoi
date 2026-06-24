@@ -823,6 +823,173 @@ Public Module SolidEdgeExporter
         End Try
     End Function
 
+    ' Legge TUTTI i blocchi del documento come definizioni a primitive
+    ' (linee/archi/cerchi nativi) piu' il nome di ciascun blocco.
+    Public Function TryReadAllBlocksAsPrimitives(ByRef definitions As List(Of BlockDefinition),
+                                                 ByRef errorMessage As String) As Boolean
+        Dim app As Object = Nothing
+        Dim doc As Object = Nothing
+        Dim blocks As Object = Nothing
+
+        definitions = New List(Of BlockDefinition)
+        errorMessage = Nothing
+
+        Try
+            app = Marshal.GetActiveObject("SolidEdge.Application")
+            doc = app.ActiveDocument
+
+            If doc Is Nothing Then
+                errorMessage = "No active Solid Edge document."
+                Return False
+            End If
+
+            blocks = doc.Blocks
+
+            If blocks Is Nothing OrElse CInt(blocks.Count) <= 0 Then
+                errorMessage = "No blocks found in the active document."
+                Return False
+            End If
+
+            For i As Integer = 1 To CInt(blocks.Count)
+                Dim blk As Object = blocks.Item(i)
+                If blk Is Nothing Then Continue For
+
+                Dim name As String = ""
+                Try
+                    name = CStr(blk.Name)
+                Catch
+                End Try
+
+                Dim view As Object = Nothing
+                Try
+                    view = blk.DefaultView
+                Catch
+                End Try
+                If view Is Nothing Then Continue For
+
+                Dim entities As List(Of ExportPath2D) = ReadProfilePrimitives(view)
+                If entities IsNot Nothing AndAlso entities.Count > 0 Then
+                    definitions.Add(New BlockDefinition With {.name = name, .entities = entities})
+                End If
+            Next
+
+            If definitions.Count = 0 Then
+                errorMessage = "No readable block geometry found."
+                Return False
+            End If
+
+            Return True
+
+        Catch ex As Exception
+            errorMessage = "Error reading blocks from Solid Edge: " & ex.Message
+            Return False
+
+        Finally
+            blocks = Nothing
+            doc = Nothing
+            app = Nothing
+        End Try
+    End Function
+
+    ' Legge la geometria di un profilo/vista come entita' a primitive native.
+    ' Ogni linea/arco e' un'entita' aperta; ogni cerchio un'entita' chiusa fatta
+    ' di due semicerchi. Coordinate in mm con Y ribaltata (come gli altri reader).
+    Private Function ReadProfilePrimitives(profile As Object) As List(Of ExportPath2D)
+        Dim entities As New List(Of ExportPath2D)
+
+        Dim lines2d As Object = Nothing
+        Dim arcs2d As Object = Nothing
+        Dim circles2d As Object = Nothing
+
+        Try
+            lines2d = profile.Lines2d
+        Catch
+        End Try
+        Try
+            arcs2d = profile.Arcs2d
+        Catch
+        End Try
+        Try
+            circles2d = profile.Circles2d
+        Catch
+        End Try
+
+        If lines2d IsNot Nothing Then
+            For i As Integer = 1 To CInt(lines2d.Count)
+                Dim ln = lines2d.Item(i)
+
+                Dim x1 As Double = 0.0
+                Dim y1 As Double = 0.0
+                ln.GetStartPoint(x1, y1)
+
+                Dim x2 As Double = 0.0
+                Dim y2 As Double = 0.0
+                ln.GetEndPoint(x2, y2)
+
+                Dim e As New ExportPath2D()
+                e.Closed = False
+                e.Segments.Add(New ExportLine2D(New Vec2(x1 * 1000.0, -y1 * 1000.0),
+                                                New Vec2(x2 * 1000.0, -y2 * 1000.0)))
+                entities.Add(e)
+            Next
+        End If
+
+        If arcs2d IsNot Nothing Then
+            For i As Integer = 1 To CInt(arcs2d.Count)
+                Dim arc = arcs2d.Item(i)
+
+                Dim xc As Double = 0.0
+                Dim yc As Double = 0.0
+                arc.GetCenterPoint(xc, yc)
+
+                Dim x1 As Double = 0.0
+                Dim y1 As Double = 0.0
+                arc.GetStartPoint(x1, y1)
+
+                Dim x2 As Double = 0.0
+                Dim y2 As Double = 0.0
+                arc.GetEndPoint(x2, y2)
+
+                Dim center As New Vec2(xc * 1000.0, -yc * 1000.0)
+                Dim sp As New Vec2(x1 * 1000.0, -y1 * 1000.0)
+                Dim ep As New Vec2(x2 * 1000.0, -y2 * 1000.0)
+                Dim rad As Double = Geo2D.Distance(center, sp)
+
+                Dim e As New ExportPath2D()
+                e.Closed = False
+                e.Segments.Add(New ExportArc2D(center, rad, sp, ep, False))
+                entities.Add(e)
+            Next
+        End If
+
+        If circles2d IsNot Nothing Then
+            For i As Integer = 1 To CInt(circles2d.Count)
+                Dim cir = circles2d.Item(i)
+
+                Dim xc As Double = 0.0
+                Dim yc As Double = 0.0
+                cir.GetCenterPoint(xc, yc)
+
+                Dim rad As Double = CDbl(cir.Radius) * 1000.0
+                Dim center As New Vec2(xc * 1000.0, -yc * 1000.0)
+                Dim pR As New Vec2(center.X + rad, center.Y)
+                Dim pL As New Vec2(center.X - rad, center.Y)
+
+                Dim e As New ExportPath2D()
+                e.Closed = True
+                e.Segments.Add(New ExportArc2D(center, rad, pR, pL, False))
+                e.Segments.Add(New ExportArc2D(center, rad, pL, pR, False))
+                entities.Add(e)
+            Next
+        End If
+
+        lines2d = Nothing
+        arcs2d = Nothing
+        circles2d = Nothing
+
+        Return entities
+    End Function
+
     Private Sub ClassifyLoops(loops As List(Of SketchBoundaryLoop))
         If loops Is Nothing OrElse loops.Count = 0 Then Exit Sub
 

@@ -43,6 +43,7 @@ Public Class MainForm
     Private ReadOnly btnReadSketchProfile As New Button()
     Private ReadOnly btnReadBlockDefaultView As New Button()
     Private currentBlockSymbolLoops As New List(Of List(Of Vec2))()
+    Private currentBlockSymbols As New List(Of BlockDefinition)()
 
     Private ReadOnly domain As RectangleF = New RectangleF(0, 0, 1000, 700)
     Private currentWorldDomain As RectangleF
@@ -346,7 +347,7 @@ Public Class MainForm
         btnReadSketchProfile.ForeColor = Color.FromArgb(30, 40, 55)
         btnReadSketchProfile.FlatStyle = FlatStyle.Flat
 
-        btnReadBlockDefaultView.Text = "Read Solid Edge Block"
+        btnReadBlockDefaultView.Text = "Read Solid Edge Blocks"
         btnReadBlockDefaultView.UseVisualStyleBackColor = False
         btnReadBlockDefaultView.BackColor = Color.White
         btnReadBlockDefaultView.ForeColor = Color.FromArgb(30, 40, 55)
@@ -921,42 +922,44 @@ Public Class MainForm
 
     Private Sub ReadBlockDefaultView_Click(sender As Object, e As EventArgs)
         Try
-            Dim loops As List(Of SolidEdgeExporter.SketchBoundaryLoop) = Nothing
-            Dim bounds As RectangleF = RectangleF.Empty
+            Dim defs As List(Of BlockDefinition) = Nothing
             Dim err As String = Nothing
 
-            If Not SolidEdgeExporter.TryReadBlockDefaultViewBoundaries(loops, bounds, err) Then
+            If Not SolidEdgeExporter.TryReadAllBlocksAsPrimitives(defs, err) Then
                 MessageBox.Show(err,
-                            "Reading profile from Solid Edge block",
+                            "Reading Solid Edge blocks",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Warning)
                 Return
             End If
 
-            If loops Is Nothing OrElse loops.Count = 0 Then
-                MessageBox.Show("No loops found in the block.",
-                            "Reading profile from Solid Edge block",
+            If defs Is Nothing OrElse defs.Count = 0 Then
+                MessageBox.Show("No blocks found.",
+                            "Reading Solid Edge blocks",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Warning)
                 Return
             End If
 
-            currentBlockSymbolLoops = NormalizeBlockLoops(loops, bounds)
-            canvas.BlockSymbolLoops = currentBlockSymbolLoops _
-            .Select(Function(lp) New List(Of Vec2)(lp)).ToList()
+            For Each d In defs
+                ExportGeometry.NormalizeBlockInPlace(d)
+            Next
+
+            currentBlockSymbols = defs
+            canvas.BlockSymbols = defs
 
             cmbStyle.SelectedItem = CellRenderStyle.BlockSymbol.ToString()
             ApplyOptions()
             canvas.Invalidate()
 
-            MessageBox.Show("Block geometry loaded as cell symbol.",
-                        "Solid Edge block",
+            MessageBox.Show(defs.Count & " block(s) loaded as cell symbols.",
+                        "Solid Edge blocks",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information)
 
         Catch ex As Exception
-            MessageBox.Show("Error while reading the block: " & ex.Message,
-                        "Solid Edge block",
+            MessageBox.Show("Error while reading blocks: " & ex.Message,
+                        "Solid Edge blocks",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error)
         End Try
