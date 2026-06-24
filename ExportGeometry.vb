@@ -329,6 +329,15 @@ Public Module ExportGeometry
         Return CSng(Math.Max(0.05F, Math.Min(1.5F, value)))
     End Function
 
+    ' Offset di rotazione manuale per-cella (radianti), additivo sull'angolo base.
+    Private Function GetEffectiveCellRotation(canvas As VoronoiCanvas, cellIndex As Integer) As Double
+        If canvas Is Nothing Then Return 0.0
+        If canvas.CellRotations IsNot Nothing AndAlso cellIndex >= 0 AndAlso cellIndex < canvas.CellRotations.Count Then
+            Return canvas.CellRotations(cellIndex)
+        End If
+        Return 0.0
+    End Function
+
     Private Function BuildBlockSymbolPaths(cell As VoronoiCell,
                                            blocks As List(Of BlockDefinition),
                                            scaleFactor As Single,
@@ -357,6 +366,7 @@ Public Module ExportGeometry
 
         Dim angle As Double = 0.0
         If randomRotation Then angle = GetStableAngleFromKey(canvas, cellIndex)
+        angle += GetEffectiveCellRotation(canvas, cellIndex)
 
         Dim cosA As Double = Math.Cos(angle)
         Dim sinA As Double = Math.Sin(angle)
@@ -398,6 +408,7 @@ Public Module ExportGeometry
 
         Dim angle As Double = 0.0
         If randomRotation Then angle = GetStableAngleFromKey(canvas, cellIndex)
+        angle += GetEffectiveCellRotation(canvas, cellIndex)
 
         ' Il punto base del blocco viene posizionato sul seed della cella.
         Dim anchor As Vec2 = cell.Seed
@@ -655,6 +666,7 @@ Public Module ExportGeometry
 
         Dim angle As Double = 0.0
         If randomRotation Then angle = GetStableAngleFromKey(canvas, cellIndex)
+        angle += GetEffectiveCellRotation(canvas, cellIndex)
 
         Dim pts = BuildRegularPolygonPointsWorld(c, radius, sides, angle + angleOffset)
 
@@ -686,6 +698,7 @@ Public Module ExportGeometry
 
         Dim angle As Double = 0.0
         If randomRotation Then angle = GetStableAngleFromKey(canvas, cellIndex)
+        angle += GetEffectiveCellRotation(canvas, cellIndex)
 
         Dim pts = BuildStarPointsWorld(c, radius, pointsCount, innerRatio, angle + angleOffset)
 

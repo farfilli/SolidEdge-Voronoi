@@ -113,11 +113,16 @@ Public Class VoronoiCanvas
 
 
     Public Event SeedScalesEdited As EventHandler
+    Public Event SeedRotationsEdited As EventHandler
 
     Public Property CellScales As List(Of Single) = New List(Of Single)
     Public Property MinCellScale As Single = 0.05F
     Public Property MaxCellScale As Single = 1.5F
     Public Property MouseWheelScaleStep As Single = 0.02F
+
+    ' Offset di rotazione per-cella (radianti), additivo sull'angolo base.
+    Public Property CellRotations As List(Of Single) = New List(Of Single)
+    Public Property MouseWheelRotateStepDeg As Single = 5.0F
 
 
 
@@ -276,6 +281,7 @@ Public Class VoronoiCanvas
         If Cells Is Nothing OrElse Cells.Count = 0 Then Return
 
         EnsureCellScaleCount(Cells.Count)
+        EnsureCellRotationCount(Cells.Count)
 
         ' Geometria stilizzata dalla fonte UNICA (world-space): stesso
         ' risultato che useranno gli exporter.
@@ -549,6 +555,20 @@ Public Class VoronoiCanvas
 
         Return ClampCellScale(CellScale)
     End Function
+
+    Private Sub EnsureCellRotationCount(requiredCount As Integer)
+        If CellRotations Is Nothing Then
+            CellRotations = New List(Of Single)()
+        End If
+
+        While CellRotations.Count < requiredCount
+            CellRotations.Add(0.0F)
+        End While
+
+        While CellRotations.Count > requiredCount
+            CellRotations.RemoveAt(CellRotations.Count - 1)
+        End While
+    End Sub
 
     Private Function IsSymbolStyle(style As CellRenderStyle) As Boolean
         Return style <> CellRenderStyle.Straight AndAlso style <> CellRenderStyle.Curved
@@ -1293,10 +1313,20 @@ Public Class VoronoiCanvas
             Return
         End If
 
-        EnsureCellScaleCount(EditableSeeds.Count)
-
         Dim wheelSteps As Single = CSng(e.Delta) / 120.0F
         If Math.Abs(wheelSteps) < 0.001F Then Return
+
+        If (ModifierKeys And Keys.Shift) = Keys.Shift Then
+            ' SHIFT + rotella: ruota il simbolo della cella (offset additivo).
+            EnsureCellRotationCount(EditableSeeds.Count)
+            Dim stepRad As Single = CSng(MouseWheelRotateStepDeg * Math.PI / 180.0)
+            CellRotations(idx) = CellRotations(idx) + stepRad * wheelSteps
+            RaiseEvent SeedRotationsEdited(Me, EventArgs.Empty)
+            Invalidate()
+            Return
+        End If
+
+        EnsureCellScaleCount(EditableSeeds.Count)
 
         Dim oldScale As Single = GetEffectiveCellScale(idx)
         Dim newScale As Single = ClampCellScale(oldScale + MouseWheelScaleStep * wheelSteps)

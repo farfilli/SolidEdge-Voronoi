@@ -53,6 +53,8 @@ Public Class MainForm
     Private currentSeeds As New List(Of Vec2)
     Private currentSeedStyleKeys As New List(Of Integer)
     Private currentSeedCellScales As New List(Of Single)
+    Private currentSeedCellRotations As New List(Of Single)
+    Private lastCellScale As Single = 0.82F
 
     Private currentSketchBoundaries As New List(Of List(Of Vec2))
     Private currentSketchDomains As New List(Of SketchDomainRegion)
@@ -111,6 +113,7 @@ Public Class MainForm
 
         AddHandler canvas.SeedsEdited, AddressOf Canvas_SeedsEdited
         AddHandler canvas.SeedScalesEdited, AddressOf Canvas_SeedScalesEdited
+        AddHandler canvas.SeedRotationsEdited, AddressOf Canvas_SeedRotationsEdited
 
         AddHandler numCells.ValueChanged, AddressOf GenerationParameterChanged
         AddHandler numSeed.ValueChanged, AddressOf GenerationParameterChanged
@@ -415,6 +418,8 @@ Public Class MainForm
         currentSeeds = VoronoiEngine.CreateSeeds(CInt(numCells.Value), domain, CInt(numSeed.Value))
         RebuildSeedStyleKeys(currentSeeds.Count, CInt(numSeed.Value))
         RebuildSeedCellScales(currentSeeds.Count, CSng(numCellScale.Value))
+        RebuildSeedCellRotations(currentSeeds.Count)
+        lastCellScale = CSng(numCellScale.Value)
 
         For i As Integer = 1 To CInt(numRelax.Value)
             Dim tmpCells = VoronoiEngine.BuildCells(currentSeeds, domain)
@@ -423,6 +428,7 @@ Public Class MainForm
 
         EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
         EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
+        EnsureSeedCellRotationCount(currentSeeds.Count)
 
         BuildFromCurrentSeeds()
     End Sub
@@ -507,6 +513,7 @@ Public Class MainForm
         Dim allSeeds As New List(Of Vec2)
         Dim allStyleKeys As New List(Of Integer)
         Dim allScales As New List(Of Single)
+        Dim allRotations As New List(Of Single)
 
         If currentSketchDomains Is Nothing OrElse currentSketchDomains.Count = 0 Then Return
 
@@ -519,6 +526,7 @@ Public Class MainForm
         Dim requestedCount As Integer = CInt(numCells.Value)
         Dim seedBase As Integer = CInt(numSeed.Value)
         Dim defaultScale As Single = CSng(numCellScale.Value)
+        lastCellScale = defaultScale
 
         For i As Integer = 0 To currentSketchDomains.Count - 1
             Dim d = currentSketchDomains(i)
@@ -537,11 +545,13 @@ Public Class MainForm
 
             Dim regionStyleKeys As New List(Of Integer)
             Dim regionScales As New List(Of Single)
+            Dim regionRotations As New List(Of Single)
             Dim rng As New Random(regionSeed Xor &H51F15E)
 
             For k As Integer = 0 To seeds.Count - 1
                 regionStyleKeys.Add(rng.Next())
                 regionScales.Add(defaultScale)
+                regionRotations.Add(0.0F)
             Next
 
             For r As Integer = 1 To CInt(numRelax.Value)
@@ -551,6 +561,7 @@ Public Class MainForm
                 Dim filteredSeeds As New List(Of Vec2)
                 Dim filteredKeys As New List(Of Integer)
                 Dim filteredScales As New List(Of Single)
+                Dim filteredRotations As New List(Of Single)
 
                 For k As Integer = 0 To seeds.Count - 1
                     If Geo2D.PointInPolygonWithHoles(seeds(k), d.Outer, d.Holes) Then
@@ -563,12 +574,17 @@ Public Class MainForm
                         If k < regionScales.Count Then
                             filteredScales.Add(regionScales(k))
                         End If
+
+                        If k < regionRotations.Count Then
+                            filteredRotations.Add(regionRotations(k))
+                        End If
                     End If
                 Next
 
                 seeds = filteredSeeds
                 regionStyleKeys = filteredKeys
                 regionScales = filteredScales
+                regionRotations = filteredRotations
             Next
 
             Dim cells = VoronoiEngine.BuildCells(seeds, d.Outer, d.Holes)
@@ -577,16 +593,19 @@ Public Class MainForm
             allCells.AddRange(cells)
             allStyleKeys.AddRange(regionStyleKeys)
             allScales.AddRange(regionScales)
+            allRotations.AddRange(regionRotations)
         Next
 
         currentSeeds = allSeeds
         currentSeedStyleKeys = allStyleKeys
         currentSeedCellScales = allScales
+        currentSeedCellRotations = allRotations
 
         canvas.Cells = allCells
         canvas.EditableSeeds = New List(Of Vec2)(allSeeds)
         canvas.SeedStyleKeys = New List(Of Integer)(currentSeedStyleKeys)
         canvas.CellScales = New List(Of Single)(currentSeedCellScales)
+        canvas.CellRotations = New List(Of Single)(currentSeedCellRotations)
 
         ApplyOptions()
         canvas.Invalidate()
@@ -601,9 +620,11 @@ Public Class MainForm
     Private Sub Canvas_SeedsEdited(sender As Object, e As EventArgs)
         currentSeeds = New List(Of Vec2)(canvas.EditableSeeds)
         currentSeedCellScales = New List(Of Single)(canvas.CellScales)
+        currentSeedCellRotations = New List(Of Single)(canvas.CellRotations)
 
         EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
         EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
+        EnsureSeedCellRotationCount(currentSeeds.Count)
 
         BuildFromCurrentSeeds()
     End Sub
@@ -612,6 +633,13 @@ Public Class MainForm
         currentSeedCellScales = New List(Of Single)(canvas.CellScales)
         EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
         canvas.CellScales = New List(Of Single)(currentSeedCellScales)
+        canvas.Invalidate()
+    End Sub
+
+    Private Sub Canvas_SeedRotationsEdited(sender As Object, e As EventArgs)
+        currentSeedCellRotations = New List(Of Single)(canvas.CellRotations)
+        EnsureSeedCellRotationCount(currentSeeds.Count)
+        canvas.CellRotations = New List(Of Single)(currentSeedCellRotations)
         canvas.Invalidate()
     End Sub
 
@@ -654,6 +682,7 @@ Public Class MainForm
     Private Sub BuildFromCurrentSeeds()
         EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
         EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
+        EnsureSeedCellRotationCount(currentSeeds.Count)
 
         If useSketchDomains AndAlso lockSketchViewDomain Then
             canvas.Domain = currentWorldDomain
@@ -666,11 +695,13 @@ Public Class MainForm
             Dim allSeeds As New List(Of Vec2)
             Dim allStyleKeys As New List(Of Integer)
             Dim allScales As New List(Of Single)
+            Dim allRotations As New List(Of Single)
 
             For Each d In currentSketchDomains
                 Dim seedsInDomain As New List(Of Vec2)
                 Dim keysInDomain As New List(Of Integer)
                 Dim scalesInDomain As New List(Of Single)
+                Dim rotationsInDomain As New List(Of Single)
 
                 For i As Integer = 0 To currentSeeds.Count - 1
                     If Geo2D.PointInPolygonWithHoles(currentSeeds(i), d.Outer, d.Holes) Then
@@ -685,6 +716,12 @@ Public Class MainForm
                         Else
                             scalesInDomain.Add(CSng(numCellScale.Value))
                         End If
+
+                        If i < currentSeedCellRotations.Count Then
+                            rotationsInDomain.Add(currentSeedCellRotations(i))
+                        Else
+                            rotationsInDomain.Add(0.0F)
+                        End If
                     End If
                 Next
 
@@ -695,12 +732,14 @@ Public Class MainForm
                 allSeeds.AddRange(seedsInDomain)
                 allStyleKeys.AddRange(keysInDomain)
                 allScales.AddRange(scalesInDomain)
+                allRotations.AddRange(rotationsInDomain)
                 allCells.AddRange(cells)
             Next
 
             currentSeeds = allSeeds
             currentSeedStyleKeys = allStyleKeys
             currentSeedCellScales = allScales
+            currentSeedCellRotations = allRotations
 
             canvas.Cells = allCells
             canvas.EditableSeeds = New List(Of Vec2)(allSeeds)
@@ -712,9 +751,11 @@ Public Class MainForm
 
         EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
         EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
+        EnsureSeedCellRotationCount(currentSeeds.Count)
 
         canvas.SeedStyleKeys = New List(Of Integer)(currentSeedStyleKeys)
         canvas.CellScales = New List(Of Single)(currentSeedCellScales)
+        canvas.CellRotations = New List(Of Single)(currentSeedCellRotations)
 
         ApplyOptions()
         canvas.Invalidate()
@@ -740,12 +781,33 @@ Public Class MainForm
     'End Sub
 
     Private Sub RefreshCanvasOptions(sender As Object, e As EventArgs)
+        ' Lo slider globale Cell Scale agisce come fattore moltiplicativo LIVE sui
+        ' valori per-cella: aggiorna subito, mantiene le differenze relative editate
+        ' e non resetta ai default.
         If sender Is numCellScale Then
-            SetAllSeedCellScales(CSng(numCellScale.Value))
+            ApplyGlobalScaleDelta(CSng(numCellScale.Value))
         End If
 
         ApplyOptions()
         canvas.Invalidate()
+    End Sub
+
+    Private Sub ApplyGlobalScaleDelta(newGlobal As Single)
+        Dim oldGlobal As Single = lastCellScale
+        lastCellScale = newGlobal
+
+        If currentSeedCellScales Is Nothing OrElse currentSeedCellScales.Count = 0 Then Return
+        If oldGlobal <= 0.0001F Then Return
+
+        Dim ratio As Single = newGlobal / oldGlobal
+        If Math.Abs(ratio - 1.0F) < 0.000001F Then Return
+
+        For i As Integer = 0 To currentSeedCellScales.Count - 1
+            Dim v As Single = currentSeedCellScales(i) * ratio
+            currentSeedCellScales(i) = CSng(Math.Max(0.05F, Math.Min(1.5F, v)))
+        Next
+
+        canvas.CellScales = New List(Of Single)(currentSeedCellScales)
     End Sub
 
     Private Sub ApplyOptions()
@@ -827,6 +889,8 @@ Public Class MainForm
 
             currentSeedCellScales = New List(Of Single)()
             canvas.CellScales = New List(Of Single)()
+            currentSeedCellRotations = New List(Of Single)()
+            canvas.CellRotations = New List(Of Single)()
 
             Dim holeFlags As New List(Of Boolean)
             Dim loopIndexMap As New Dictionary(Of Integer, SolidEdgeExporter.SketchBoundaryLoop)
@@ -1131,6 +1195,28 @@ Public Class MainForm
         For i As Integer = 0 To currentSeedCellScales.Count - 1
             currentSeedCellScales(i) = CSng(Math.Max(0.05F, Math.Min(1.5F, currentSeedCellScales(i))))
         Next
+    End Sub
+
+    Private Sub RebuildSeedCellRotations(count As Integer)
+        currentSeedCellRotations = New List(Of Single)(count)
+
+        For i As Integer = 0 To count - 1
+            currentSeedCellRotations.Add(0.0F)
+        Next
+    End Sub
+
+    Private Sub EnsureSeedCellRotationCount(count As Integer)
+        If currentSeedCellRotations Is Nothing Then
+            currentSeedCellRotations = New List(Of Single)()
+        End If
+
+        While currentSeedCellRotations.Count < count
+            currentSeedCellRotations.Add(0.0F)
+        End While
+
+        While currentSeedCellRotations.Count > count
+            currentSeedCellRotations.RemoveAt(currentSeedCellRotations.Count - 1)
+        End While
     End Sub
 
     Private Sub SetAllSeedCellScales(scale As Single)
