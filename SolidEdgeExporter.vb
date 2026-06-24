@@ -867,9 +867,26 @@ Public Module SolidEdgeExporter
                 End Try
                 If view Is Nothing Then Continue For
 
+                ' Punto base/origine del blocco (su cui SE applica scala e rotazione
+                ' dell'occorrenza). Stessa convenzione della geometria: mm, Y ribaltata.
+                Dim gx As Double = 0.0
+                Dim gy As Double = 0.0
+                Try
+                    blk.GetOrigin(gx, gy)
+                Catch
+                    Try
+                        view.GetOrigin(gx, gy)
+                    Catch
+                    End Try
+                End Try
+
                 Dim entities As List(Of ExportPath2D) = ReadProfilePrimitives(view)
                 If entities IsNot Nothing AndAlso entities.Count > 0 Then
-                    definitions.Add(New BlockDefinition With {.Name = name, .Entities = entities})
+                    definitions.Add(New BlockDefinition With {
+                        .Name = name,
+                        .Entities = entities,
+                        .BaseOrigin = New Vec2(gx * 1000.0, -gy * 1000.0)
+                    })
                 End If
             Next
 
@@ -1283,75 +1300,7 @@ Public Module SolidEdgeExporter
             bSplineCurves2d = profile.BSplineCurves2d
 
             For Each path In paths
-                For Each seg In path.Segments
-                    If TypeOf seg Is ExportLine2D Then
-                        Dim ln = DirectCast(seg, ExportLine2D)
-                        Dim p1 = FlipX(ln.P1)
-                        Dim p2 = FlipX(ln.P2)
-
-                        lines2d.AddBy2Points(
-                            x1:=p1.X / 1000.0,
-                            y1:=p1.Y / 1000.0,
-                            x2:=p2.X / 1000.0,
-                            y2:=p2.Y / 1000.0)
-
-                    ElseIf TypeOf seg Is ExportArc2D Then
-                        Dim a = DirectCast(seg, ExportArc2D)
-
-                        Dim c = FlipX(a.Center)
-                        Dim s = FlipX(a.StartPoint)
-                        Dim en = FlipX(a.EndPoint)
-
-                        Dim sx = s.X / 1000.0
-                        Dim sy = s.Y / 1000.0
-                        Dim ex = en.X / 1000.0
-                        Dim ey = en.Y / 1000.0
-                        Dim cx = c.X / 1000.0
-                        Dim cy = c.Y / 1000.0
-
-                        Dim isClockwise As Boolean = a.Clockwise
-
-                        If isClockwise Then
-                            arcs2d.AddByCenterStartEnd(
-                                xCenter:=cx,
-                                yCenter:=cy,
-                                xStart:=ex,
-                                yStart:=ey,
-                                xEnd:=sx,
-                                yEnd:=sy)
-                        Else
-                            arcs2d.AddByCenterStartEnd(
-                                xCenter:=cx,
-                                yCenter:=cy,
-                                xStart:=sx,
-                                yStart:=sy,
-                                xEnd:=ex,
-                                yEnd:=ey)
-                        End If
-
-                    ElseIf TypeOf seg Is ExportCubicBezier2D Then
-                        Dim bz = DirectCast(seg, ExportCubicBezier2D)
-
-                        Dim p0 = FlipX(bz.P0)
-                        Dim c1 = FlipX(bz.C1)
-                        Dim c2 = FlipX(bz.C2)
-                        Dim p3 = FlipX(bz.P3)
-
-                        Dim poles() As Double = {
-                            p0.X / 1000.0, p0.Y / 1000.0,
-                            c1.X / 1000.0, c1.Y / 1000.0,
-                            c2.X / 1000.0, c2.Y / 1000.0,
-                            p3.X / 1000.0, p3.Y / 1000.0
-                        }
-
-                        Dim knots() As Double = {
-                            0.0, 0.0, 0.0, 0.0,
-                            1.0, 1.0, 1.0, 1.0
-                        }
-
-                        bSplineCurves2d.Add(3, 4, poles, knots)
-                    End If
-                Next
+                EmitPathGeometry(path, lines2d, arcs2d, bSplineCurves2d)
             Next
 
             app.ScreenUpdating = True
@@ -1367,6 +1316,159 @@ Public Module SolidEdgeExporter
             doc = Nothing
             app = Nothing
         End Try
+    End Sub
+
+    ' Export per-cella: le celle a blocco diventano occorrenze native (BlockOccurrences.Add),
+    ' le altre vengono emesse come geometria (linee/archi/spline) come prima.
+    Public Sub ExportToActivePartSketch(geoms As List(Of CellGeometry))
+        Dim app As Object = Nothing
+        Dim doc As Object = Nothing
+        Dim profile As Object = Nothing
+        Dim lines2d As Object = Nothing
+        Dim arcs2d As Object = Nothing
+        Dim bSplineCurves2d As Object = Nothing
+        Dim blockOccurrences As Object = Nothing
+
+        Try
+            app = Marshal.GetActiveObject("SolidEdge.Application")
+            doc = app.ActiveDocument
+
+            If doc.ActiveSketch Is Nothing Then
+                MsgBox("A sketch must be active!", MsgBoxStyle.Exclamation, "Solid Edge Voronoi")
+                Exit Sub
+            End If
+            profile = doc.ActiveSketch
+
+            app.ScreenUpdating = False
+
+            lines2d = profile.Lines2d
+            arcs2d = profile.Arcs2d
+            bSplineCurves2d = profile.BSplineCurves2d
+
+            Try
+                blockOccurrences = profile.BlockOccurrences
+            Catch
+                blockOccurrences = Nothing
+            End Try
+
+            For Each cg In geoms
+                If cg Is Nothing Then Continue For
+
+                If cg.HasBlock AndAlso Not String.IsNullOrEmpty(cg.BlockName) AndAlso blockOccurrences IsNot Nothing Then
+                    blockOccurrences.Add(
+                        BlockName:=cg.BlockName,
+                        xOrigin:=cg.BlockOriginX,
+                        yOrigin:=cg.BlockOriginY,
+                        Scale:=cg.BlockScale,
+                        Rotation:=cg.BlockRotation)
+                Else
+                    For Each path In cg.StyledPaths
+                        EmitPathGeometry(path, lines2d, arcs2d, bSplineCurves2d)
+                    Next
+                End If
+            Next
+
+            app.ScreenUpdating = True
+
+        Catch ex As Exception
+            Throw New Exception("Error exporting to Solid Edge: " & ex.Message, ex)
+
+        Finally
+            blockOccurrences = Nothing
+            bSplineCurves2d = Nothing
+            arcs2d = Nothing
+            lines2d = Nothing
+            profile = Nothing
+            doc = Nothing
+            app = Nothing
+        End Try
+    End Sub
+
+    ' Emissione di un singolo path come geometria 2D nello sketch attivo.
+    Private Sub EmitPathGeometry(path As ExportPath2D,
+                                 lines2d As Object,
+                                 arcs2d As Object,
+                                 bSplineCurves2d As Object)
+        If path Is Nothing OrElse path.Segments Is Nothing Then Return
+
+        For Each seg In path.Segments
+            If TypeOf seg Is ExportLine2D Then
+                Dim ln = DirectCast(seg, ExportLine2D)
+                Dim p1 = FlipX(ln.P1)
+                Dim p2 = FlipX(ln.P2)
+
+                lines2d.AddBy2Points(
+                    x1:=p1.X / 1000.0,
+                    y1:=p1.Y / 1000.0,
+                    x2:=p2.X / 1000.0,
+                    y2:=p2.Y / 1000.0)
+
+            ElseIf TypeOf seg Is ExportArc2D Then
+                Dim a = DirectCast(seg, ExportArc2D)
+
+                Dim c = FlipX(a.Center)
+                Dim s = FlipX(a.StartPoint)
+                Dim en = FlipX(a.EndPoint)
+
+                Dim sx = s.X / 1000.0
+                Dim sy = s.Y / 1000.0
+                Dim ex = en.X / 1000.0
+                Dim ey = en.Y / 1000.0
+                Dim cx = c.X / 1000.0
+                Dim cy = c.Y / 1000.0
+
+                ' SE disegna l'arco CCW da start a end (Y in alto). Il FlipX inverte
+                ' il verso rispetto al nostro frame: SweepDeg>0 (orario a video) = CCW
+                ' in SE, quindi nessuno scambio; altrimenti scambio start/end.
+                Dim swapEnds As Boolean
+                If Not Double.IsNaN(a.SweepDeg) Then
+                    ' Verificato su SE: per gli archi da blocco lo swap va con SweepDeg > 0.
+                    swapEnds = (a.SweepDeg > 0.0)
+                Else
+                    swapEnds = (Not a.Clockwise)
+                End If
+
+                If swapEnds Then
+                    arcs2d.AddByCenterStartEnd(
+                        xCenter:=cx,
+                        yCenter:=cy,
+                        xStart:=ex,
+                        yStart:=ey,
+                        xEnd:=sx,
+                        yEnd:=sy)
+                Else
+                    arcs2d.AddByCenterStartEnd(
+                        xCenter:=cx,
+                        yCenter:=cy,
+                        xStart:=sx,
+                        yStart:=sy,
+                        xEnd:=ex,
+                        yEnd:=ey)
+                End If
+
+            ElseIf TypeOf seg Is ExportCubicBezier2D Then
+                Dim bz = DirectCast(seg, ExportCubicBezier2D)
+
+                Dim p0 = FlipX(bz.P0)
+                Dim c1 = FlipX(bz.C1)
+                Dim c2 = FlipX(bz.C2)
+                Dim p3 = FlipX(bz.P3)
+
+                Dim poles() As Double = {
+                    p0.X / 1000.0, p0.Y / 1000.0,
+                    c1.X / 1000.0, c1.Y / 1000.0,
+                    c2.X / 1000.0, c2.Y / 1000.0,
+                    p3.X / 1000.0, p3.Y / 1000.0
+                }
+
+                Dim knots() As Double = {
+                    0.0, 0.0, 0.0, 0.0,
+                    1.0, 1.0, 1.0, 1.0
+                }
+
+                bSplineCurves2d.Add(3, 4, poles, knots)
+            End If
+        Next
     End Sub
 
     Private Function FlipX(p As Vec2) As Vec2

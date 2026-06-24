@@ -32,6 +32,7 @@ Public Class MainForm
     Private ReadOnly chkSeeds As New CheckBox()
     Private ReadOnly chkInner As New CheckBox()
     Private ReadOnly chkRandomRotation As New CheckBox()
+    Private ReadOnly chkExportAsBlocks As New CheckBox()
 
     Private ReadOnly btnGenerate As New Button()
     Private ReadOnly btnShuffle As New Button()
@@ -167,6 +168,7 @@ Public Class MainForm
         AddRowTitle("Export")
         AddRowControl(btnExportSvg, 30)
         AddRowControl(btnExportDxf, 30)
+        AddRowControl(chkExportAsBlocks)
         AddRowControl(btnToSolidEdge, 30)
     End Sub
 
@@ -322,6 +324,11 @@ Public Class MainForm
         chkRandomRotation.Text = "Random symbol rotation"
         chkRandomRotation.Checked = True
         chkRandomRotation.ForeColor = Color.FromArgb(30, 40, 55)
+
+        chkExportAsBlocks.Text = "To SE as blocks (occurrences)"
+        chkExportAsBlocks.Checked = False
+        chkExportAsBlocks.ForeColor = Color.FromArgb(30, 40, 55)
+        chkExportAsBlocks.Margin = New Padding(3, 1, 3, 1)
 
         chkFill.Margin = New Padding(3, 1, 3, 1)
         chkOuter.Margin = New Padding(3, 1, 3, 1)
@@ -1045,13 +1052,21 @@ Public Class MainForm
 
     Private Sub ExportToSolidEdge_Click(sender As Object, e As EventArgs)
         Try
-            Dim paths = ExportGeometry.BuildExportPaths(canvas)
-            If paths Is Nothing OrElse paths.Count = 0 Then
-                MessageBox.Show("No geometry to export.", "Solid Edge", MessageBoxButtons.OK, MessageBoxIcon.Information)
-                Return
+            If chkExportAsBlocks.Checked Then
+                Dim geoms = ExportGeometry.BuildCellGeometry(canvas)
+                If geoms Is Nothing OrElse geoms.Count = 0 Then
+                    MessageBox.Show("No geometry to export.", "Solid Edge", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                    Return
+                End If
+                SolidEdgeExporter.ExportToActivePartSketch(geoms)
+            Else
+                Dim paths = ExportGeometry.BuildExportPaths(canvas)
+                If paths Is Nothing OrElse paths.Count = 0 Then
+                    MessageBox.Show("No geometry to export.", "Solid Edge", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                    Return
+                End If
+                SolidEdgeExporter.ExportToActivePartSketch(paths)
             End If
-
-            SolidEdgeExporter.ExportToActivePartSketch(paths)
 
             MessageBox.Show("Geometry sent to Solid Edge in the sketch.", "Solid Edge", MessageBoxButtons.OK, MessageBoxIcon.Information)
 

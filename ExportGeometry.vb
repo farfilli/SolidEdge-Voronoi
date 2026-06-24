@@ -99,6 +99,16 @@ End Class
 Public Class BlockDefinition
     Public Property Name As String = ""
     Public Property Entities As New List(Of ExportPath2D)
+
+    ' Riferimenti nativi (prima della normalizzazione), in mm nel nostro frame
+    ' Y-in-basso: centro del bounding box e raggio massimo. Servono a calcolare
+    ' origine e scala dell'occorrenza nativa in Solid Edge.
+    Public Property NativeCenter As Vec2 = New Vec2(0, 0)
+    Public Property NativeRadius As Double = 0.0
+
+    ' Punto base/origine del blocco in SE (su cui SE applica scala e rotazione
+    ' dell'occorrenza), in mm nel nostro frame Y-in-basso.
+    Public Property BaseOrigin As Vec2 = New Vec2(0, 0)
 End Class
 
 Public Class CellGeometry
@@ -106,6 +116,15 @@ Public Class CellGeometry
     Public Property Cell As VoronoiCell
     Public Property EffectiveStyle As CellRenderStyle
     Public Property StyledPaths As New List(Of ExportPath2D)
+
+    ' Piazzamento come occorrenza di blocco nativo Solid Edge (solo celle BlockSymbol).
+    ' Origine in metri SE (Y verso l'alto), scala adimensionale, rotazione in radianti.
+    Public Property HasBlock As Boolean = False
+    Public Property BlockName As String = ""
+    Public Property BlockOriginX As Double = 0.0
+    Public Property BlockOriginY As Double = 0.0
+    Public Property BlockScale As Double = 1.0
+    Public Property BlockRotation As Double = 0.0
 End Class
 
 Public Module ExportGeometry
@@ -277,6 +296,10 @@ Public Module ExportGeometry
                 End If
             Next
 
+            If effectiveStyle = CellRenderStyle.BlockSymbol Then
+                SetBlockPlacement(cg, cell, canvas.BlockSymbols, effectiveScale, canvas.RandomRotation, cellIndex, canvas)
+            End If
+
             If cg.StyledPaths.Count > 0 Then
                 result.Add(cg)
             End If
@@ -339,6 +362,55 @@ Public Module ExportGeometry
 
         Return result
     End Function
+
+    ' Calcola il piazzamento dell'occorrenza nativa in SE per una cella a blocco,
+    ' coerente con come BuildBlockSymbolPaths disegna l'anteprima.
+    Private Sub SetBlockPlacement(cg As CellGeometry,
+                                  cell As VoronoiCell,
+                                  blocks As List(Of BlockDefinition),
+                                  scaleFactor As Single,
+                                  randomRotation As Boolean,
+                                  cellIndex As Integer,
+                                  canvas As VoronoiCanvas)
+        If cell Is Nothing OrElse cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Return
+        If blocks Is Nothing OrElse blocks.Count = 0 Then Return
+
+        Dim def As BlockDefinition = blocks(GetStableBlockIndex(canvas, cellIndex, blocks.Count))
+        If def Is Nothing OrElse String.IsNullOrEmpty(def.Name) OrElse def.NativeRadius <= 0.000001 Then Return
+
+        Dim c As Vec2 = Geo2D.PolygonCentroid(cell.Vertices)
+        Dim radius As Double = GetInscribedRadius(cell.Vertices, c)
+        radius *= Math.Max(0.05, Math.Min(1.5, scaleFactor))
+
+        Dim angle As Double = 0.0
+        If randomRotation Then angle = GetStableAngleFromKey(canvas, cellIndex)
+
+        Dim cosA As Double = Math.Cos(angle)
+        Dim sinA As Double = Math.Sin(angle)
+
+        Dim maxR As Double = def.NativeRadius
+
+        ' Offset (normalizzato) dal centro geometria al punto base del blocco:
+        ' SE posiziona il punto base, quindi l'origine dell'occorrenza e'
+        '   centroCella + Scala * rotazione(puntoBase - centroGeometria).
+        Dim dX As Double = (def.BaseOrigin.X - def.NativeCenter.X) / maxR
+        Dim dY As Double = (def.BaseOrigin.Y - def.NativeCenter.Y) / maxR
+
+        Dim orx As Double = dX * cosA - dY * sinA
+        Dim ory As Double = dX * sinA + dY * cosA
+        Dim oWorldX As Double = c.X + orx * radius
+        Dim oWorldY As Double = c.Y + ory * radius
+
+        cg.HasBlock = True
+        cg.BlockName = def.Name
+        ' Metri SE, con Y ribaltata indietro (SE ha Y verso l'alto).
+        cg.BlockOriginX = oWorldX / 1000.0
+        cg.BlockOriginY = -oWorldY / 1000.0
+        cg.BlockScale = radius / maxR
+        ' Rotazione in SE: il flip Y inverte il verso. In GRADI (SE interpreta il
+        ' parametro Rotation di BlockOccurrences.Add in gradi, non in radianti).
+        cg.BlockRotation = -angle * 180.0 / Math.PI
+    End Sub
 
     ' Indice di blocco stabile per cella: usa la chiave per-seme se presente.
     Private Function GetStableBlockIndex(canvas As VoronoiCanvas, cellIndex As Integer, count As Integer) As Integer
@@ -431,6 +503,10 @@ Public Module ExportGeometry
         Next
 
         If maxR <= 0.000001 Then Return
+
+        ' Salvo i riferimenti nativi per il piazzamento dell'occorrenza in SE.
+        def.NativeCenter = New Vec2(cx, cy)
+        def.NativeRadius = maxR
 
         For Each e In def.Entities
             Dim ns As New List(Of ExportSegment2D)
