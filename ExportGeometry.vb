@@ -344,9 +344,16 @@ Public Module ExportGeometry
         Dim def As BlockDefinition = blocks(GetStableBlockIndex(canvas, cellIndex, blocks.Count))
         If def Is Nothing OrElse def.Entities Is Nothing OrElse def.Entities.Count = 0 Then Return result
 
-        Dim c As Vec2 = Geo2D.PolygonCentroid(cell.Vertices)
-        Dim radius As Double = GetInscribedRadius(cell.Vertices, c)
-        radius *= Math.Max(0.05, Math.Min(1.5, scaleFactor))
+        Dim maxR As Double = def.NativeRadius
+        If maxR <= 0.000001 Then Return result
+
+        ' Scala dal raggio del cerchio equivalente all'area della cella.
+        Dim radius As Double = BlockRadiusFromArea(cell, scaleFactor)
+
+        ' Ancoraggio: il punto base del blocco coincide col seed della cella.
+        Dim anchor As Vec2 = cell.Seed
+        Dim baseNx As Double = (def.BaseOrigin.X - def.NativeCenter.X) / maxR
+        Dim baseNy As Double = (def.BaseOrigin.Y - def.NativeCenter.Y) / maxR
 
         Dim angle As Double = 0.0
         If randomRotation Then angle = GetStableAngleFromKey(canvas, cellIndex)
@@ -356,11 +363,19 @@ Public Module ExportGeometry
 
         For Each entity In def.Entities
             If entity Is Nothing OrElse entity.Segments Is Nothing OrElse entity.Segments.Count = 0 Then Continue For
-            Dim te = TransformBlockEntity(entity, c, radius, cosA, sinA)
+            Dim te = TransformBlockEntity(entity, anchor, baseNx, baseNy, radius, cosA, sinA)
             If te.Segments.Count > 0 Then result.Add(te)
         Next
 
         Return result
+    End Function
+
+    ' Raggio di scala del blocco in funzione dell'area della cella: raggio del
+    ' cerchio di pari area, moltiplicato per il fattore di scala (per-cella/slider).
+    Private Function BlockRadiusFromArea(cell As VoronoiCell, scaleFactor As Single) As Double
+        Dim area As Double = Math.Abs(Geo2D.SignedArea(cell.Vertices))
+        Dim rArea As Double = Math.Sqrt(area / Math.PI)
+        Return rArea * Math.Max(0.05, Math.Min(1.5, scaleFactor))
     End Function
 
     ' Calcola il piazzamento dell'occorrenza nativa in SE per una cella a blocco,
@@ -378,34 +393,20 @@ Public Module ExportGeometry
         Dim def As BlockDefinition = blocks(GetStableBlockIndex(canvas, cellIndex, blocks.Count))
         If def Is Nothing OrElse String.IsNullOrEmpty(def.Name) OrElse def.NativeRadius <= 0.000001 Then Return
 
-        Dim c As Vec2 = Geo2D.PolygonCentroid(cell.Vertices)
-        Dim radius As Double = GetInscribedRadius(cell.Vertices, c)
-        radius *= Math.Max(0.05, Math.Min(1.5, scaleFactor))
+        Dim maxR As Double = def.NativeRadius
+        Dim radius As Double = BlockRadiusFromArea(cell, scaleFactor)
 
         Dim angle As Double = 0.0
         If randomRotation Then angle = GetStableAngleFromKey(canvas, cellIndex)
 
-        Dim cosA As Double = Math.Cos(angle)
-        Dim sinA As Double = Math.Sin(angle)
-
-        Dim maxR As Double = def.NativeRadius
-
-        ' Offset (normalizzato) dal centro geometria al punto base del blocco:
-        ' SE posiziona il punto base, quindi l'origine dell'occorrenza e'
-        '   centroCella + Scala * rotazione(puntoBase - centroGeometria).
-        Dim dX As Double = (def.BaseOrigin.X - def.NativeCenter.X) / maxR
-        Dim dY As Double = (def.BaseOrigin.Y - def.NativeCenter.Y) / maxR
-
-        Dim orx As Double = dX * cosA - dY * sinA
-        Dim ory As Double = dX * sinA + dY * cosA
-        Dim oWorldX As Double = c.X + orx * radius
-        Dim oWorldY As Double = c.Y + ory * radius
+        ' Il punto base del blocco viene posizionato sul seed della cella.
+        Dim anchor As Vec2 = cell.Seed
 
         cg.HasBlock = True
         cg.BlockName = def.Name
         ' Metri SE, con Y ribaltata indietro (SE ha Y verso l'alto).
-        cg.BlockOriginX = oWorldX / 1000.0
-        cg.BlockOriginY = -oWorldY / 1000.0
+        cg.BlockOriginX = anchor.X / 1000.0
+        cg.BlockOriginY = -anchor.Y / 1000.0
         cg.BlockScale = radius / maxR
         ' Rotazione in SE: il flip Y inverte il verso. In GRADI (SE interpreta il
         ' parametro Rotation di BlockOccurrences.Add in gradi, non in radianti).
@@ -428,7 +429,9 @@ Public Module ExportGeometry
     ' Trasforma un'entita' di blocco (spazio locale ~raggio 1) nello spazio mondo:
     ' rotazione + scala (radius) + traslazione sul centro cella. Gli archi restano archi.
     Private Function TransformBlockEntity(entity As ExportPath2D,
-                                          c As Vec2,
+                                          anchor As Vec2,
+                                          baseNx As Double,
+                                          baseNy As Double,
                                           r As Double,
                                           cosA As Double,
                                           sinA As Double) As ExportPath2D
@@ -438,15 +441,15 @@ Public Module ExportGeometry
         For Each seg In entity.Segments
             If TypeOf seg Is ExportLine2D Then
                 Dim ln = DirectCast(seg, ExportLine2D)
-                outp.Segments.Add(New ExportLine2D(MapBlockPoint(ln.P1, c, r, cosA, sinA),
-                                                   MapBlockPoint(ln.P2, c, r, cosA, sinA)))
+                outp.Segments.Add(New ExportLine2D(MapBlockPoint(ln.P1, anchor, baseNx, baseNy, r, cosA, sinA),
+                                                   MapBlockPoint(ln.P2, anchor, baseNx, baseNy, r, cosA, sinA)))
 
             ElseIf TypeOf seg Is ExportArc2D Then
                 Dim a = DirectCast(seg, ExportArc2D)
-                Dim na As New ExportArc2D(MapBlockPoint(a.Center, c, r, cosA, sinA),
+                Dim na As New ExportArc2D(MapBlockPoint(a.Center, anchor, baseNx, baseNy, r, cosA, sinA),
                                           a.Radius * r,
-                                          MapBlockPoint(a.StartPoint, c, r, cosA, sinA),
-                                          MapBlockPoint(a.EndPoint, c, r, cosA, sinA),
+                                          MapBlockPoint(a.StartPoint, anchor, baseNx, baseNy, r, cosA, sinA),
+                                          MapBlockPoint(a.EndPoint, anchor, baseNx, baseNy, r, cosA, sinA),
                                           a.Clockwise)
                 na.SweepDeg = a.SweepDeg
                 outp.Segments.Add(na)
@@ -456,10 +459,14 @@ Public Module ExportGeometry
         Return outp
     End Function
 
-    Private Function MapBlockPoint(p As Vec2, c As Vec2, r As Double, cosA As Double, sinA As Double) As Vec2
-        Dim rx As Double = p.X * cosA - p.Y * sinA
-        Dim ry As Double = p.X * sinA + p.Y * cosA
-        Return New Vec2(c.X + rx * r, c.Y + ry * r)
+    ' Mappa un punto normalizzato del blocco nel mondo: porta il punto base
+    ' (baseNx,baseNy) sull'origine, ruota, scala e ancora su 'anchor' (il seed).
+    Private Function MapBlockPoint(p As Vec2, anchor As Vec2, baseNx As Double, baseNy As Double, r As Double, cosA As Double, sinA As Double) As Vec2
+        Dim dx As Double = p.X - baseNx
+        Dim dy As Double = p.Y - baseNy
+        Dim rx As Double = dx * cosA - dy * sinA
+        Dim ry As Double = dx * sinA + dy * cosA
+        Return New Vec2(anchor.X + rx * r, anchor.Y + ry * r)
     End Function
 
     ' Normalizza in place una definizione di blocco attorno all'origine (~raggio 1),
@@ -467,39 +474,38 @@ Public Module ExportGeometry
     Public Sub NormalizeBlockInPlace(def As BlockDefinition)
         If def Is Nothing OrElse def.Entities Is Nothing OrElse def.Entities.Count = 0 Then Return
 
-        Dim hasAny As Boolean = False
-        Dim minX As Double = 0.0, minY As Double = 0.0, maxX As Double = 0.0, maxY As Double = 0.0
-
+        ' Punti rappresentativi: estremi delle linee e campionamento del percorso
+        ' reale degli archi (cosi' un arco a raggio grande non gonfia l'ingombro).
+        Dim pts As New List(Of Vec2)
         For Each e In def.Entities
             For Each seg In e.Segments
                 If TypeOf seg Is ExportLine2D Then
                     Dim ln = DirectCast(seg, ExportLine2D)
-                    AccumulateBounds(ln.P1, hasAny, minX, minY, maxX, maxY)
-                    AccumulateBounds(ln.P2, hasAny, minX, minY, maxX, maxY)
+                    pts.Add(ln.P1)
+                    pts.Add(ln.P2)
                 ElseIf TypeOf seg Is ExportArc2D Then
-                    Dim a = DirectCast(seg, ExportArc2D)
-                    AccumulateBounds(New Vec2(a.Center.X - a.Radius, a.Center.Y - a.Radius), hasAny, minX, minY, maxX, maxY)
-                    AccumulateBounds(New Vec2(a.Center.X + a.Radius, a.Center.Y + a.Radius), hasAny, minX, minY, maxX, maxY)
+                    AccumulateArcPoints(DirectCast(seg, ExportArc2D), pts)
                 End If
             Next
         Next
 
-        If Not hasAny Then Return
+        If pts.Count = 0 Then Return
+
+        Dim minX As Double = pts(0).X, maxX As Double = pts(0).X
+        Dim minY As Double = pts(0).Y, maxY As Double = pts(0).Y
+        For Each p In pts
+            If p.X < minX Then minX = p.X
+            If p.X > maxX Then maxX = p.X
+            If p.Y < minY Then minY = p.Y
+            If p.Y > maxY Then maxY = p.Y
+        Next
 
         Dim cx As Double = (minX + maxX) / 2.0
         Dim cy As Double = (minY + maxY) / 2.0
 
         Dim maxR As Double = 0.0
-        For Each e In def.Entities
-            For Each seg In e.Segments
-                If TypeOf seg Is ExportLine2D Then
-                    Dim ln = DirectCast(seg, ExportLine2D)
-                    maxR = Math.Max(maxR, Math.Max(DistTo(ln.P1, cx, cy), DistTo(ln.P2, cx, cy)))
-                ElseIf TypeOf seg Is ExportArc2D Then
-                    Dim a = DirectCast(seg, ExportArc2D)
-                    maxR = Math.Max(maxR, DistTo(a.Center, cx, cy) + a.Radius)
-                End If
-            Next
+        For Each p In pts
+            maxR = Math.Max(maxR, DistTo(p, cx, cy))
         Next
 
         If maxR <= 0.000001 Then Return
@@ -526,6 +532,28 @@ Public Module ExportGeometry
                 End If
             Next
             e.Segments = ns
+        Next
+    End Sub
+
+    ' Aggiunge punti rappresentativi di un arco. Per archi parziali (SweepDeg noto)
+    ' campiona il percorso reale; per i semicerchi dei cerchi (SweepDeg = NaN) usa
+    ' centro +/- raggio, che per un cerchio e' l'ingombro corretto.
+    Private Sub AccumulateArcPoints(a As ExportArc2D, pts As List(Of Vec2))
+        If Double.IsNaN(a.SweepDeg) Then
+            pts.Add(New Vec2(a.Center.X - a.Radius, a.Center.Y - a.Radius))
+            pts.Add(New Vec2(a.Center.X + a.Radius, a.Center.Y + a.Radius))
+            Return
+        End If
+
+        Dim aStart As Double = Math.Atan2(a.StartPoint.Y - a.Center.Y, a.StartPoint.X - a.Center.X)
+        Dim sweepRad As Double = a.SweepDeg * Math.PI / 180.0
+
+        Const steps As Integer = 8
+        For i As Integer = 0 To steps
+            Dim t As Double = i / CDbl(steps)
+            Dim ang As Double = aStart + sweepRad * t
+            pts.Add(New Vec2(a.Center.X + a.Radius * Math.Cos(ang),
+                             a.Center.Y + a.Radius * Math.Sin(ang)))
         Next
     End Sub
 
