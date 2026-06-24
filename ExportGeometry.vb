@@ -360,7 +360,7 @@ Public Module ExportGeometry
         Dim radius As Double = BlockRadiusFromArea(cell, scaleFactor)
 
         ' Ancoraggio: il punto base del blocco coincide col seed della cella.
-        Dim anchor As Vec2 = cell.Seed
+        Dim anchor As Vec2 = Geo2D.PolygonCentroid(cell.Vertices)
         Dim baseNx As Double = (def.BaseOrigin.X - def.NativeCenter.X) / maxR
         Dim baseNy As Double = (def.BaseOrigin.Y - def.NativeCenter.Y) / maxR
 
@@ -411,7 +411,7 @@ Public Module ExportGeometry
         angle += GetEffectiveCellRotation(canvas, cellIndex)
 
         ' Il punto base del blocco viene posizionato sul seed della cella.
-        Dim anchor As Vec2 = cell.Seed
+        Dim anchor As Vec2 = Geo2D.PolygonCentroid(cell.Vertices)
 
         cg.HasBlock = True
         cg.BlockName = def.Name
@@ -419,9 +419,9 @@ Public Module ExportGeometry
         cg.BlockOriginX = anchor.X / 1000.0
         cg.BlockOriginY = -anchor.Y / 1000.0
         cg.BlockScale = radius / maxR
-        ' Rotazione in SE: il flip Y inverte il verso. In GRADI (SE interpreta il
-        ' parametro Rotation di BlockOccurrences.Add in gradi, non in radianti).
-        cg.BlockRotation = -angle * 180.0 / Math.PI
+        ' Rotazione occorrenza in RADIANTI (SE usa radianti). Il segno e' -angle:
+        ' il nostro frame Y-in-basso e SE Y-in-alto hanno verso opposto.
+        cg.BlockRotation = -angle
     End Sub
 
     ' Indice di blocco stabile per cella: usa la chiave per-seme se presente.
