@@ -71,9 +71,17 @@ Public Module DxfExporter
         Dim startAngle = NormalizeAngleDeg(Math.Atan2(s.Y - c.Y, s.X - c.X) * 180.0 / Math.PI)
         Dim endAngle = NormalizeAngleDeg(Math.Atan2(e.Y - c.Y, e.X - c.X) * 180.0 / Math.PI)
 
-        Dim isClockwise As Boolean = Not arc.Clockwise
+        ' DXF disegna l'arco CCW da group50 a group51 (frame CAD, Y in alto).
+        ' Il FlipX inverte il verso rispetto al nostro frame schermo.
+        Dim doSwap As Boolean
+        If Not Double.IsNaN(arc.SweepDeg) Then
+            ' SweepDeg>0 = orario a video = CCW in CAD: nessuno scambio.
+            doSwap = (arc.SweepDeg < 0.0)
+        Else
+            doSwap = (Not arc.Clockwise)
+        End If
 
-        If isClockwise Then
+        If doSwap Then
             Dim tmp = startAngle
             startAngle = endAngle
             endAngle = tmp

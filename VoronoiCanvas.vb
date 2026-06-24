@@ -374,15 +374,22 @@ Public Class VoronoiCanvas
         End If
 
         Dim startAngle As Double = Math.Atan2(s.Y - c.Y, s.X - c.X) * 180.0 / Math.PI
-        Dim endAngle As Double = Math.Atan2(ept.Y - c.Y, ept.X - c.X) * 180.0 / Math.PI
-        Dim sweep As Double = endAngle - startAngle
 
-        While sweep <= -180.0
-            sweep += 360.0
-        End While
-        While sweep > 180.0
-            sweep -= 360.0
-        End While
+        Dim sweep As Double
+        If Not Double.IsNaN(arc.SweepDeg) Then
+            ' Arco importato da blocco: sweep reale con segno (anche > 180).
+            sweep = arc.SweepDeg
+        Else
+            ' Raccordi / semicerchi: arco minore, come prima.
+            Dim endAngle As Double = Math.Atan2(ept.Y - c.Y, ept.X - c.X) * 180.0 / Math.PI
+            sweep = endAngle - startAngle
+            While sweep <= -180.0
+                sweep += 360.0
+            End While
+            While sweep > 180.0
+                sweep -= 360.0
+            End While
+        End If
 
         Dim rect As New RectangleF(c.X - rPx, c.Y - rPx, rPx * 2.0F, rPx * 2.0F)
         path.AddArc(rect, CSng(startAngle), CSng(sweep))

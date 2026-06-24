@@ -869,7 +869,7 @@ Public Module SolidEdgeExporter
 
                 Dim entities As List(Of ExportPath2D) = ReadProfilePrimitives(view)
                 If entities IsNot Nothing AndAlso entities.Count > 0 Then
-                    definitions.Add(New BlockDefinition With {.name = name, .entities = entities})
+                    definitions.Add(New BlockDefinition With {.Name = name, .Entities = entities})
                 End If
             Next
 
@@ -955,9 +955,31 @@ Public Module SolidEdgeExporter
                 Dim ep As New Vec2(x2 * 1000.0, -y2 * 1000.0)
                 Dim rad As Double = Geo2D.Distance(center, sp)
 
+                Dim orientation As Integer = 1
+                Try
+                    orientation = CInt(arc.Orientation)
+                Catch
+                End Try
+
+                ' Angoli nel nostro frame (Y in basso, punti gia' ribaltati).
+                Dim _aS As Double = Math.Atan2(sp.Y - center.Y, sp.X - center.X) * 180.0 / Math.PI
+                Dim aE As Double = Math.Atan2(ep.Y - center.Y, ep.X - center.X) * 180.0 / Math.PI
+
+                ' SE Orientation: 0 = CW, 1 = CCW (frame SE, Y in alto). Il flip Y
+                ' inverte il verso: SE-CW => verso positivo (orario) nel nostro frame.
+                Dim sweep As Double
+                If orientation = 0 Then
+                    sweep = NormPos360(aE - _aS)
+                Else
+                    sweep = NormPos360(aE - _aS) - 360.0
+                End If
+
+                Dim arcSeg As New ExportArc2D(center, rad, sp, ep, orientation = 0)
+                arcSeg.SweepDeg = sweep
+
                 Dim e As New ExportPath2D()
                 e.Closed = False
-                e.Segments.Add(New ExportArc2D(center, rad, sp, ep, False))
+                e.Segments.Add(arcSeg)
                 entities.Add(e)
             Next
         End If
@@ -988,6 +1010,13 @@ Public Module SolidEdgeExporter
         circles2d = Nothing
 
         Return entities
+    End Function
+
+    ' Normalizza un angolo in gradi nell'intervallo [0, 360).
+    Private Function NormPos360(a As Double) As Double
+        Dim r As Double = a Mod 360.0
+        If r < 0.0 Then r += 360.0
+        Return r
     End Function
 
     Private Sub ClassifyLoops(loops As List(Of SketchBoundaryLoop))
@@ -1280,7 +1309,7 @@ Public Module SolidEdgeExporter
                         Dim cx = c.X / 1000.0
                         Dim cy = c.Y / 1000.0
 
-                        Dim isClockwise As Boolean = Not a.Clockwise
+                        Dim isClockwise As Boolean = a.Clockwise
 
                         If isClockwise Then
                             arcs2d.AddByCenterStartEnd(

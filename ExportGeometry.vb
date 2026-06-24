@@ -38,6 +38,11 @@ Public Class ExportArc2D
     Public Property EndPoint As Vec2
     Public Property Clockwise As Boolean
 
+    ' Sweep con segno in gradi, nel frame Y-in-basso (positivo = orario a video).
+    ' NaN => arco non specificato: i consumatori usano l'arco minore (raccordi,
+    ' semicerchi dei cerchi). Impostato per gli archi importati dai blocchi.
+    Public Property SweepDeg As Double = Double.NaN
+
     Public Sub New()
         Kind = ExportSegmentKind.Arc
     End Sub
@@ -366,11 +371,13 @@ Public Module ExportGeometry
 
             ElseIf TypeOf seg Is ExportArc2D Then
                 Dim a = DirectCast(seg, ExportArc2D)
-                outp.Segments.Add(New ExportArc2D(MapBlockPoint(a.Center, c, r, cosA, sinA),
-                                                  a.Radius * r,
-                                                  MapBlockPoint(a.StartPoint, c, r, cosA, sinA),
-                                                  MapBlockPoint(a.EndPoint, c, r, cosA, sinA),
-                                                  a.Clockwise))
+                Dim na As New ExportArc2D(MapBlockPoint(a.Center, c, r, cosA, sinA),
+                                          a.Radius * r,
+                                          MapBlockPoint(a.StartPoint, c, r, cosA, sinA),
+                                          MapBlockPoint(a.EndPoint, c, r, cosA, sinA),
+                                          a.Clockwise)
+                na.SweepDeg = a.SweepDeg
+                outp.Segments.Add(na)
             End If
         Next
 
@@ -433,11 +440,13 @@ Public Module ExportGeometry
                     ns.Add(New ExportLine2D(NormBlockPoint(ln.P1, cx, cy, maxR), NormBlockPoint(ln.P2, cx, cy, maxR)))
                 ElseIf TypeOf seg Is ExportArc2D Then
                     Dim a = DirectCast(seg, ExportArc2D)
-                    ns.Add(New ExportArc2D(NormBlockPoint(a.Center, cx, cy, maxR),
-                                           a.Radius / maxR,
-                                           NormBlockPoint(a.StartPoint, cx, cy, maxR),
-                                           NormBlockPoint(a.EndPoint, cx, cy, maxR),
-                                           a.Clockwise))
+                    Dim na As New ExportArc2D(NormBlockPoint(a.Center, cx, cy, maxR),
+                                              a.Radius / maxR,
+                                              NormBlockPoint(a.StartPoint, cx, cy, maxR),
+                                              NormBlockPoint(a.EndPoint, cx, cy, maxR),
+                                              a.Clockwise)
+                    na.SweepDeg = a.SweepDeg
+                    ns.Add(na)
                 End If
             Next
             e.Segments = ns

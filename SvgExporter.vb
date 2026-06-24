@@ -83,8 +83,14 @@ Public Module SvgExporter
                     firstMove = False
                 End If
 
+                Dim largeArc As Integer = 0
                 Dim sweepFlag As Integer = If(s.Clockwise, 0, 1)
-                sb.Append($"A {F(s.Radius)} {F(s.Radius)} 0 0 {sweepFlag} {F(s.EndPoint.X)} {F(s.EndPoint.Y)} ")
+                If Not Double.IsNaN(s.SweepDeg) Then
+                    ' Arco da blocco: estensione e verso reali (Y in basso, come SVG).
+                    largeArc = If(Math.Abs(s.SweepDeg) > 180.0, 1, 0)
+                    sweepFlag = If(s.SweepDeg > 0.0, 1, 0)
+                End If
+                sb.Append($"A {F(s.Radius)} {F(s.Radius)} 0 {largeArc} {sweepFlag} {F(s.EndPoint.X)} {F(s.EndPoint.Y)} ")
 
             ElseIf TypeOf seg Is ExportCubicBezier2D Then
                 Dim s = DirectCast(seg, ExportCubicBezier2D)
