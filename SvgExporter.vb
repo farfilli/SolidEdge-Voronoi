@@ -223,6 +223,9 @@ Public Module SvgExporter
             ElseIf TypeOf seg Is ExportCubicBezier2D Then
                 Dim b = DirectCast(seg, ExportCubicBezier2D)
                 r.Add(b.P0) : r.Add(b.C1) : r.Add(b.C2) : r.Add(b.P3)
+            ElseIf TypeOf seg Is ExportEllipse2D Then
+                Dim el = DirectCast(seg, ExportEllipse2D)
+                r.AddRange(ExportGeometry.SampleEllipse(el.Center, el.RadiusMajor, el.RadiusMinor, el.RotationRad, 16))
             End If
         Next
         Return r
@@ -265,6 +268,27 @@ Public Module SvgExporter
                 End If
 
                 sb.Append($"C {F(s.C1.X)} {F(s.C1.Y)} {F(s.C2.X)} {F(s.C2.Y)} {F(s.P3.X)} {F(s.P3.Y)} ")
+
+            ElseIf TypeOf seg Is ExportEllipse2D Then
+                Dim s = DirectCast(seg, ExportEllipse2D)
+                Dim dirx As Double = Math.Cos(s.RotationRad)
+                Dim diry As Double = Math.Sin(s.RotationRad)
+                Dim p0x As Double = s.Center.X + dirx * s.RadiusMajor
+                Dim p0y As Double = s.Center.Y + diry * s.RadiusMajor
+                Dim p1x As Double = s.Center.X - dirx * s.RadiusMajor
+                Dim p1y As Double = s.Center.Y - diry * s.RadiusMajor
+                Dim rotDeg As Double = s.RotationRad * 180.0 / Math.PI
+
+                ' Un'ellisse completa = due semi-archi ellittici. SVG supporta
+                ' nativamente rx ry e la rotazione dell'asse x.
+                If firstMove Then
+                    sb.Append($"M {F(p0x)} {F(p0y)} ")
+                    firstMove = False
+                Else
+                    sb.Append($"L {F(p0x)} {F(p0y)} ")
+                End If
+                sb.Append($"A {F(s.RadiusMajor)} {F(s.RadiusMinor)} {F(rotDeg)} 0 1 {F(p1x)} {F(p1y)} ")
+                sb.Append($"A {F(s.RadiusMajor)} {F(s.RadiusMinor)} {F(rotDeg)} 0 1 {F(p0x)} {F(p0y)} ")
             End If
         Next
 

@@ -311,6 +311,32 @@ Public Class VoronoiCanvas
 
             ElseIf TypeOf seg Is ExportArc2D Then
                 If AddWorldArc(path, DirectCast(seg, ExportArc2D), view) Then added = True
+
+            ElseIf TypeOf seg Is ExportEllipse2D Then
+                Dim el = DirectCast(seg, ExportEllipse2D)
+                Dim wpts = ExportGeometry.SampleEllipse(el.Center, el.RadiusMajor, el.RadiusMinor, el.RotationRad, 48)
+                Dim spts As New List(Of PointF)
+                Dim ok As Boolean = True
+                Dim mnx As Single = Single.MaxValue, mny As Single = Single.MaxValue
+                Dim mxx As Single = Single.MinValue, mxy As Single = Single.MinValue
+                For Each wp2 In wpts
+                    Dim sp = WorldToScreen(wp2, view)
+                    If Not IsSanePt(sp) Then
+                        ok = False
+                        Exit For
+                    End If
+                    spts.Add(sp)
+                    If sp.X < mnx Then mnx = sp.X
+                    If sp.Y < mny Then mny = sp.Y
+                    If sp.X > mxx Then mxx = sp.X
+                    If sp.Y > mxy Then mxy = sp.Y
+                Next
+                ' Estensione minima: evita il bug GDI+ dei cap su figure ~nulle.
+                If ok AndAlso spts.Count >= 3 AndAlso (mxx - mnx) + (mxy - mny) >= MinDrawLenPx Then
+                    spts.Add(spts(0))
+                    path.AddLines(spts.ToArray())
+                    added = True
+                End If
             End If
         Next
 

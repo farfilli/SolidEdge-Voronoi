@@ -29,6 +29,8 @@ Public Module DxfExporter
                     WriteArcEntity(sb, DirectCast(seg, ExportArc2D))
                 ElseIf TypeOf seg Is ExportCubicBezier2D Then
                     WriteSplineEntity(sb, DirectCast(seg, ExportCubicBezier2D))
+                ElseIf TypeOf seg Is ExportEllipse2D Then
+                    WriteEllipseEntity(sb, DirectCast(seg, ExportEllipse2D))
                 End If
             Next
         Next
@@ -39,6 +41,45 @@ Public Module DxfExporter
         sb.AppendLine("EOF")
 
         File.WriteAllText(filePath, sb.ToString(), Encoding.ASCII)
+    End Sub
+
+    Private Sub WriteEllipseEntity(sb As StringBuilder, el As ExportEllipse2D)
+        Dim c = FlipX(el.Center)
+
+        ' Vettore asse maggiore (relativo al centro). FlipX su un vettore = negare Y.
+        Dim mvx As Double = Math.Cos(el.RotationRad) * el.RadiusMajor
+        Dim mvy As Double = Math.Sin(el.RotationRad) * el.RadiusMajor
+        Dim relX As Double = mvx
+        Dim relY As Double = -mvy
+
+        Dim ratio As Double = If(el.RadiusMajor <> 0.0, el.RadiusMinor / el.RadiusMajor, 0.0)
+
+        sb.AppendLine("0")
+        sb.AppendLine("ELLIPSE")
+        sb.AppendLine("8")
+        sb.AppendLine("0")
+        sb.AppendLine("100")
+        sb.AppendLine("AcDbEntity")
+        sb.AppendLine("100")
+        sb.AppendLine("AcDbEllipse")
+        sb.AppendLine("10")
+        sb.AppendLine(F(c.X))
+        sb.AppendLine("20")
+        sb.AppendLine(F(c.Y))
+        sb.AppendLine("30")
+        sb.AppendLine("0")
+        sb.AppendLine("11")
+        sb.AppendLine(F(relX))
+        sb.AppendLine("21")
+        sb.AppendLine(F(relY))
+        sb.AppendLine("31")
+        sb.AppendLine("0")
+        sb.AppendLine("40")
+        sb.AppendLine(F(ratio))
+        sb.AppendLine("41")
+        sb.AppendLine("0")
+        sb.AppendLine("42")
+        sb.AppendLine(F(2.0 * Math.PI))
     End Sub
 
     Private Sub WriteLineEntity(sb As StringBuilder, ln As ExportLine2D)

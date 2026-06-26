@@ -6,6 +6,7 @@ Public Enum ExportSegmentKind
     Line
     Arc
     CubicBezier
+    Ellipse
 End Enum
 
 Public MustInherit Class ExportSegment2D
@@ -75,6 +76,34 @@ Public Class ExportCubicBezier2D
         Me.C1 = c1
         Me.C2 = c2
         Me.P3 = p3
+    End Sub
+End Class
+
+' Ellisse completa in world-space. Center = centro; RadiusMajor/RadiusMinor =
+' semiassi; RotationRad = angolo dell'asse maggiore (frame Y-in-basso, come il
+' resto). Orientation conserva il valore grezzo Geom2dOrientationConstants letto
+' da SE, da ripassare ad AddByCenter in export (per un'ellisse completa e'
+' ininfluente sulla forma).
+Public Class ExportEllipse2D
+    Inherits ExportSegment2D
+
+    Public Property Center As Vec2
+    Public Property RadiusMajor As Double
+    Public Property RadiusMinor As Double
+    Public Property RotationRad As Double
+    Public Property Orientation As Integer = 0
+
+    Public Sub New()
+        Kind = ExportSegmentKind.Ellipse
+    End Sub
+
+    Public Sub New(center As Vec2, rMajor As Double, rMinor As Double, rotationRad As Double, orientation As Integer)
+        Kind = ExportSegmentKind.Ellipse
+        Me.Center = center
+        Me.RadiusMajor = rMajor
+        Me.RadiusMinor = rMinor
+        Me.RotationRad = rotationRad
+        Me.Orientation = orientation
     End Sub
 End Class
 
@@ -397,6 +426,16 @@ Public Module ExportGeometry
                                           a.Clockwise)
                 na.SweepDeg = a.SweepDeg
                 outp.Segments.Add(na)
+
+            ElseIf TypeOf seg Is ExportEllipse2D Then
+                Dim el = DirectCast(seg, ExportEllipse2D)
+                Dim ang As Double = Math.Atan2(sinA, cosA)
+                outp.Segments.Add(New ExportEllipse2D(
+                    MapBlockPoint(el.Center, anchor, baseNx, baseNy, r, cosA, sinA),
+                    el.RadiusMajor * r,
+                    el.RadiusMinor * r,
+                    el.RotationRad + ang,
+                    el.Orientation))
             End If
         Next
 
@@ -429,6 +468,8 @@ Public Module ExportGeometry
                     pts.Add(ln.P2)
                 ElseIf TypeOf seg Is ExportArc2D Then
                     AccumulateArcPoints(DirectCast(seg, ExportArc2D), pts)
+                ElseIf TypeOf seg Is ExportEllipse2D Then
+                    AccumulateEllipsePoints(DirectCast(seg, ExportEllipse2D), pts)
                 End If
             Next
         Next
@@ -485,6 +526,13 @@ Public Module ExportGeometry
                         na.SweepDeg = a.SweepDeg
                         ns.Add(na)
                     End If
+                ElseIf TypeOf seg Is ExportEllipse2D Then
+                    Dim el = DirectCast(seg, ExportEllipse2D)
+                    ns.Add(New ExportEllipse2D(NormBlockPoint(el.Center, cx, cy, maxR),
+                                               el.RadiusMajor / maxR,
+                                               el.RadiusMinor / maxR,
+                                               el.RotationRad,
+                                               el.Orientation))
                 End If
             Next
             e.Segments = ns
@@ -511,6 +559,31 @@ Public Module ExportGeometry
             pts.Add(New Vec2(a.Center.X + a.Radius * Math.Cos(ang),
                              a.Center.Y + a.Radius * Math.Sin(ang)))
         Next
+    End Sub
+
+    ' Campiona un'ellisse completa in 'steps' punti (frame world). L'eventuale
+    ' chiusura del loop e' lasciata al chiamante.
+    Public Function SampleEllipse(center As Vec2,
+                                  rMajor As Double,
+                                  rMinor As Double,
+                                  rotationRad As Double,
+                                  steps As Integer) As List(Of Vec2)
+        Dim pts As New List(Of Vec2)
+        If steps < 8 Then steps = 8
+        Dim ca As Double = Math.Cos(rotationRad)
+        Dim sa As Double = Math.Sin(rotationRad)
+        For i As Integer = 0 To steps - 1
+            Dim t As Double = (i / CDbl(steps)) * 2.0 * Math.PI
+            Dim ex As Double = rMajor * Math.Cos(t)
+            Dim ey As Double = rMinor * Math.Sin(t)
+            pts.Add(New Vec2(center.X + ex * ca - ey * sa,
+                             center.Y + ex * sa + ey * ca))
+        Next
+        Return pts
+    End Function
+
+    Private Sub AccumulateEllipsePoints(el As ExportEllipse2D, pts As List(Of Vec2))
+        pts.AddRange(SampleEllipse(el.Center, el.RadiusMajor, el.RadiusMinor, el.RotationRad, 16))
     End Sub
 
     Private Function DistTo(p As Vec2, cx As Double, cy As Double) As Double

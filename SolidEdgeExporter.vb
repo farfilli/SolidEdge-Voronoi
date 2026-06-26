@@ -29,6 +29,7 @@ Public Module SolidEdgeExporter
         Dim lines2d As Object = Nothing
         Dim arcs2d As Object = Nothing
         Dim circles2d As Object = Nothing
+        Dim ellipses2d As Object = Nothing
 
         loops = New List(Of SketchBoundaryLoop)
         totalBounds = RectangleF.Empty
@@ -118,6 +119,47 @@ Public Module SolidEdgeExporter
                 Next
             End If
 
+            Try
+                ellipses2d = profile.Ellipses2d
+            Catch
+                ellipses2d = Nothing
+            End Try
+
+            If ellipses2d IsNot Nothing Then
+                For i As Integer = 1 To CInt(ellipses2d.Count)
+                    Dim el = ellipses2d.Item(i)
+
+                    Dim xc As Double = 0.0, yc As Double = 0.0
+                    el.GetCenterPoint(xc, yc)
+
+                    ' GetMajorAxis/GetMinorAxis restituiscono i VETTORI semiasse
+                    ' (relativi al centro), non punti assoluti. I vettori vanno solo
+                    ' scalati e riflessi in Y (niente sottrazione del centro).
+                    Dim xa As Double = 0.0, ya As Double = 0.0
+                    el.GetMajorAxis(xa, ya)
+                    Dim xb As Double = 0.0, yb As Double = 0.0
+                    el.GetMinorAxis(xb, yb)
+
+                    Dim centerW As New Vec2(xc * 1000.0, -yc * 1000.0)
+                    Dim majVx As Double = xa * 1000.0
+                    Dim majVy As Double = -ya * 1000.0
+                    Dim minVx As Double = xb * 1000.0
+                    Dim minVy As Double = -yb * 1000.0
+
+                    Dim rMajor As Double = Math.Sqrt(majVx * majVx + majVy * majVy)
+                    Dim rMinor As Double = Math.Sqrt(minVx * minVx + minVy * minVy)
+                    If rMajor <= 0.0001 Then Continue For
+                    Dim rot As Double = Math.Atan2(majVy, majVx)
+
+                    ' L'ellisse del profilo viene campionata nel contorno del dominio
+                    ' (il dominio Voronoi e' comunque poligonale, come per i cerchi).
+                    Dim pts = ExportGeometry.SampleEllipse(centerW, rMajor, rMinor, rot, 96)
+                    If pts.Count >= 3 Then
+                        pieces.Add(New BoundaryPiece With {.Points = pts})
+                    End If
+                Next
+            End If
+
             If pieces.Count = 0 Then
                 errorMessage = "No readable geometry found in " & sourceLabel & "."
                 Return False
@@ -160,6 +202,7 @@ Public Module SolidEdgeExporter
             Return False
 
         Finally
+            ellipses2d = Nothing
             circles2d = Nothing
             arcs2d = Nothing
             lines2d = Nothing
@@ -294,6 +337,7 @@ Public Module SolidEdgeExporter
         Dim lines2d As Object = Nothing
         Dim arcs2d As Object = Nothing
         Dim circles2d As Object = Nothing
+        Dim ellipses2d As Object = Nothing
 
         Try
             lines2d = profile.Lines2d
@@ -305,6 +349,10 @@ Public Module SolidEdgeExporter
         End Try
         Try
             circles2d = profile.Circles2d
+        Catch
+        End Try
+        Try
+            ellipses2d = profile.Ellipses2d
         Catch
         End Try
 
@@ -399,9 +447,48 @@ Public Module SolidEdgeExporter
             Next
         End If
 
+        If ellipses2d IsNot Nothing Then
+            For i As Integer = 1 To CInt(ellipses2d.Count)
+                Dim el = ellipses2d.Item(i)
+
+                Dim xc As Double = 0.0, yc As Double = 0.0
+                el.GetCenterPoint(xc, yc)
+
+                ' Assi maggiore/minore come VETTORI semiasse (relativi al centro).
+                Dim xa As Double = 0.0, ya As Double = 0.0
+                el.GetMajorAxis(xa, ya)
+                Dim xb As Double = 0.0, yb As Double = 0.0
+                el.GetMinorAxis(xb, yb)
+
+                Dim orient As Integer = 0
+                Try
+                    orient = CInt(el.Orientation)
+                Catch
+                    orient = 0
+                End Try
+
+                Dim centerW As New Vec2(xc * 1000.0, -yc * 1000.0)
+                Dim majVx As Double = xa * 1000.0
+                Dim majVy As Double = -ya * 1000.0
+                Dim minVx As Double = xb * 1000.0
+                Dim minVy As Double = -yb * 1000.0
+
+                Dim rMajor As Double = Math.Sqrt(majVx * majVx + majVy * majVy)
+                Dim rMinor As Double = Math.Sqrt(minVx * minVx + minVy * minVy)
+                If rMajor <= 0.0001 Then Continue For
+                Dim rot As Double = Math.Atan2(majVy, majVx)
+
+                Dim e As New ExportPath2D()
+                e.Closed = True
+                e.Segments.Add(New ExportEllipse2D(centerW, rMajor, rMinor, rot, orient))
+                entities.Add(e)
+            Next
+        End If
+
         lines2d = Nothing
         arcs2d = Nothing
         circles2d = Nothing
+        ellipses2d = Nothing
 
         Return entities
     End Function
@@ -659,6 +746,7 @@ Public Module SolidEdgeExporter
         Dim lines2d As Object = Nothing
         Dim arcs2d As Object = Nothing
         Dim bSplineCurves2d As Object = Nothing
+        Dim ellipses2d As Object = Nothing
 
         Try
             app = Marshal.GetActiveObject("SolidEdge.Application")
@@ -675,9 +763,10 @@ Public Module SolidEdgeExporter
             lines2d = profile.Lines2d
             arcs2d = profile.Arcs2d
             bSplineCurves2d = profile.BSplineCurves2d
+            ellipses2d = profile.Ellipses2d
 
             For Each path In paths
-                EmitPathGeometry(path, lines2d, arcs2d, bSplineCurves2d)
+                EmitPathGeometry(path, lines2d, arcs2d, bSplineCurves2d, ellipses2d)
             Next
 
             app.ScreenUpdating = True
@@ -686,6 +775,7 @@ Public Module SolidEdgeExporter
             Throw New Exception("Error exporting to Solid Edge: " & ex.Message, ex)
 
         Finally
+            ellipses2d = Nothing
             bSplineCurves2d = Nothing
             arcs2d = Nothing
             lines2d = Nothing
@@ -704,6 +794,7 @@ Public Module SolidEdgeExporter
         Dim lines2d As Object = Nothing
         Dim arcs2d As Object = Nothing
         Dim bSplineCurves2d As Object = Nothing
+        Dim ellipses2d As Object = Nothing
         Dim blockOccurrences As Object = Nothing
 
         Try
@@ -721,6 +812,7 @@ Public Module SolidEdgeExporter
             lines2d = profile.Lines2d
             arcs2d = profile.Arcs2d
             bSplineCurves2d = profile.BSplineCurves2d
+            ellipses2d = profile.Ellipses2d
 
             Try
                 blockOccurrences = profile.BlockOccurrences
@@ -740,7 +832,7 @@ Public Module SolidEdgeExporter
                         Rotation:=cg.BlockRotation)
                 Else
                     For Each path In cg.StyledPaths
-                        EmitPathGeometry(path, lines2d, arcs2d, bSplineCurves2d)
+                        EmitPathGeometry(path, lines2d, arcs2d, bSplineCurves2d, ellipses2d)
                     Next
                 End If
             Next
@@ -752,6 +844,7 @@ Public Module SolidEdgeExporter
 
         Finally
             blockOccurrences = Nothing
+            ellipses2d = Nothing
             bSplineCurves2d = Nothing
             arcs2d = Nothing
             lines2d = Nothing
@@ -765,7 +858,8 @@ Public Module SolidEdgeExporter
     Private Sub EmitPathGeometry(path As ExportPath2D,
                                  lines2d As Object,
                                  arcs2d As Object,
-                                 bSplineCurves2d As Object)
+                                 bSplineCurves2d As Object,
+                                 ellipses2d As Object)
         If path Is Nothing OrElse path.Segments Is Nothing Then Return
 
         For Each seg In path.Segments
@@ -844,6 +938,29 @@ Public Module SolidEdgeExporter
                 }
 
                 bSplineCurves2d.Add(3, 4, poles, knots)
+
+            ElseIf TypeOf seg Is ExportEllipse2D Then
+                Dim el = DirectCast(seg, ExportEllipse2D)
+
+                ' Centro (punto) e asse maggiore (VETTORE relativo al centro),
+                ' riportati nel frame SE (Y in alto) e in metri. Coerente con la
+                ' lettura: GetMajorAxis e' un vettore semiasse, quindi anche
+                ' AddByCenter riceve il vettore, non un punto assoluto.
+                Dim cf = FlipX(el.Center)
+                Dim majVxW As Double = Math.Cos(el.RotationRad) * el.RadiusMajor
+                Dim majVyW As Double = Math.Sin(el.RotationRad) * el.RadiusMajor
+                ' Vettore: solo riflessione in Y (nessun centro), poi in metri.
+                Dim majSEx As Double = majVxW / 1000.0
+                Dim majSEy As Double = -majVyW / 1000.0
+                Dim ratio As Double = If(el.RadiusMajor <> 0.0, el.RadiusMinor / el.RadiusMajor, 1.0)
+
+                ellipses2d.AddByCenter(
+                    cf.X / 1000.0,
+                    cf.Y / 1000.0,
+                    majSEx,
+                    majSEy,
+                    ratio,
+                    el.Orientation)
             End If
         Next
     End Sub
