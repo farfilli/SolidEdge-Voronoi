@@ -529,6 +529,12 @@ Public Module ExportGeometry
         path.FillColor = Color.Transparent
     End Sub
 
+    ' Colore di palette per una cella (stesso usato per le geometrie stilizzate).
+    ' Esposto per consentire agli exporter di colorare riempimenti coerentemente.
+    Public Function GetExportCellColor(index As Integer) As Color
+        Return GetExportColor(index)
+    End Function
+
     Private Function GetExportColor(index As Integer) As Color
         Dim palette As Color() = {
             Color.FromArgb(0, 188, 212),
