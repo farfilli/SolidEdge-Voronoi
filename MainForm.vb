@@ -43,7 +43,6 @@ Public Class MainForm
 
     Private ReadOnly btnReadSketchProfile As New Button()
     Private ReadOnly btnReadBlockDefaultView As New Button()
-    Private currentBlockSymbolLoops As New List(Of List(Of Vec2))()
     Private currentBlockSymbols As New List(Of BlockDefinition)()
 
     Private ReadOnly domain As RectangleF = New RectangleF(0, 0, 1000, 700)
@@ -954,41 +953,6 @@ Public Class MainForm
 
 
 
-    Private Function NormalizeBlockLoops(loops As List(Of SolidEdgeExporter.SketchBoundaryLoop),
-                                     bounds As RectangleF) As List(Of List(Of Vec2))
-
-        Dim result As New List(Of List(Of Vec2))()
-        If loops Is Nothing OrElse loops.Count = 0 Then Return result
-
-        Dim cx As Double = bounds.Left + bounds.Width / 2.0
-        Dim cy As Double = bounds.Top + bounds.Height / 2.0
-
-        Dim maxR As Double = 0.0
-        For Each lp In loops
-            If lp Is Nothing OrElse lp.Points Is Nothing Then Continue For
-            For Each p In lp.Points
-                Dim dx = p.X - cx
-                Dim dy = p.Y - cy
-                Dim rr = Math.Sqrt(dx * dx + dy * dy)
-                If rr > maxR Then maxR = rr
-            Next
-        Next
-
-        If maxR <= 0.000001 Then Return result
-
-        For Each lp In loops
-            If lp Is Nothing OrElse lp.Points Is Nothing OrElse lp.Points.Count < 2 Then Continue For
-
-            Dim pts As New List(Of Vec2)
-            For Each p In lp.Points
-                pts.Add(New Vec2((p.X - cx) / maxR, (p.Y - cy) / maxR))
-            Next
-
-            If pts.Count >= 2 Then result.Add(pts)
-        Next
-
-        Return result
-    End Function
 
 
     Private Sub ReadBlockDefaultView_Click(sender As Object, e As EventArgs)
@@ -1217,20 +1181,6 @@ Public Class MainForm
         While currentSeedCellRotations.Count > count
             currentSeedCellRotations.RemoveAt(currentSeedCellRotations.Count - 1)
         End While
-    End Sub
-
-    Private Sub SetAllSeedCellScales(scale As Single)
-        If currentSeeds Is Nothing Then
-            currentSeeds = New List(Of Vec2)()
-        End If
-
-        EnsureSeedCellScaleCount(currentSeeds.Count, scale)
-
-        For i As Integer = 0 To currentSeedCellScales.Count - 1
-            currentSeedCellScales(i) = scale
-        Next
-
-        canvas.CellScales = New List(Of Single)(currentSeedCellScales)
     End Sub
 
 End Class

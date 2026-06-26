@@ -129,86 +129,6 @@ End Class
 
 Public Module ExportGeometry
 
-    'Public Function BuildExportPaths(canvas As VoronoiCanvas) As List(Of ExportPath2D)
-    '    Dim result As New List(Of ExportPath2D)
-    '    If canvas Is Nothing OrElse canvas.Cells Is Nothing Then Return result
-
-    '    Dim cellIndex As Integer = 0
-
-    '    For Each cell In canvas.Cells
-    '        If cell Is Nothing OrElse cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Continue For
-
-    '        Dim p As ExportPath2D = Nothing
-    '        Dim effectiveStyle As CellRenderStyle = GetEffectiveRenderStyle(canvas, cellIndex)
-
-    '        Select Case effectiveStyle
-    '            Case CellRenderStyle.Straight
-    '                p = BuildStraightCellPath(cell)
-
-    '            Case CellRenderStyle.Curved
-    '                If canvas.InnerCornerMode = InnerCornerStyle.Arc Then
-    '                    p = BuildInnerArcCellPath(cell, canvas.InnerOffset, canvas.CornerTrim)
-    '                Else
-    '                    p = BuildInnerBezierCellPath(cell, canvas.InnerOffset, canvas.CornerTrim, canvas.BezierBulge)
-    '                End If
-
-    '            Case CellRenderStyle.Circle
-    '                p = BuildCircleAsArcPath(cell, canvas.CellScale)
-
-    '            Case CellRenderStyle.Square
-    '                p = BuildPolygonSymbolPath(cell, canvas.CellScale, canvas.RandomRotation, cellIndex, 4, 0.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
-
-    '            Case CellRenderStyle.RoundedSquare
-    '                p = BuildPolygonSymbolPath(cell, canvas.CellScale, canvas.RandomRotation, cellIndex, 4, 0.0, SymbolCornerStyle.FilletArc, Math.Max(canvas.SymbolCornerTrim, 0.18F), canvas.SymbolBezierBulge, canvas)
-
-    '            Case CellRenderStyle.Triangle
-    '                p = BuildPolygonSymbolPath(cell, canvas.CellScale, canvas.RandomRotation, cellIndex, 3, -Math.PI / 2.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
-
-    '            Case CellRenderStyle.Pentagon
-    '                p = BuildPolygonSymbolPath(cell, canvas.CellScale, canvas.RandomRotation, cellIndex, 5, -Math.PI / 2.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
-
-    '            Case CellRenderStyle.Hexagon
-    '                p = BuildPolygonSymbolPath(cell, canvas.CellScale, canvas.RandomRotation, cellIndex, 6, 0.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
-
-    '            Case CellRenderStyle.Octagon
-    '                p = BuildPolygonSymbolPath(cell, canvas.CellScale, canvas.RandomRotation, cellIndex, 8, 0.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
-
-    '            Case CellRenderStyle.Star
-    '                p = BuildStarSymbolPath(cell, canvas.CellScale, canvas.RandomRotation, cellIndex, 5, 0.46, -Math.PI / 2.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
-
-    '            Case CellRenderStyle.Star3
-    '                p = BuildStarSymbolPath(cell, canvas.CellScale, canvas.RandomRotation, cellIndex, 3, 0.3, -Math.PI / 2.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
-
-    '            Case CellRenderStyle.Star4
-    '                p = BuildStarSymbolPath(cell, canvas.CellScale, canvas.RandomRotation, cellIndex, 4, 0.45, -Math.PI / 4.0, canvas.SymbolCornerMode, canvas.SymbolCornerTrim, canvas.SymbolBezierBulge, canvas)
-
-    '            Case CellRenderStyle.BlockSymbol
-    '                Dim blockPaths = BuildBlockSymbolPaths(cell, canvas.BlockSymbolLoops, canvas.CellScale, canvas.RandomRotation, cellIndex, canvas)
-
-    '                If blockPaths IsNot Nothing AndAlso blockPaths.Count > 0 Then
-    '                    For Each bp In blockPaths
-    '                        ApplyDefaultStyle(bp, canvas, cellIndex)
-    '                        result.Add(bp)
-    '                    Next
-
-    '                    cellIndex += 1
-    '                End If
-
-    '                Continue For
-
-    '        End Select
-
-    '        If p IsNot Nothing AndAlso p.Segments.Count > 0 Then
-    '            ApplyDefaultStyle(p, canvas, cellIndex)
-    '            result.Add(p)
-    '            cellIndex += 1
-    '        End If
-    '    Next
-
-    '    Return result
-    'End Function
-
-
     ' ====================================================================
     ' GENERAZIONE UNICA DELLA GEOMETRIA (world-space).
     ' Sia il canvas (preview) sia gli exporter consumano questo risultato.
@@ -533,13 +453,25 @@ Public Module ExportGeometry
                     ns.Add(New ExportLine2D(NormBlockPoint(ln.P1, cx, cy, maxR), NormBlockPoint(ln.P2, cx, cy, maxR)))
                 ElseIf TypeOf seg Is ExportArc2D Then
                     Dim a = DirectCast(seg, ExportArc2D)
-                    Dim na As New ExportArc2D(NormBlockPoint(a.Center, cx, cy, maxR),
-                                              a.Radius / maxR,
-                                              NormBlockPoint(a.StartPoint, cx, cy, maxR),
-                                              NormBlockPoint(a.EndPoint, cx, cy, maxR),
-                                              a.Clockwise)
-                    na.SweepDeg = a.SweepDeg
-                    ns.Add(na)
+                    Dim ns0 = NormBlockPoint(a.StartPoint, cx, cy, maxR)
+                    Dim ne0 = NormBlockPoint(a.EndPoint, cx, cy, maxR)
+                    Dim nr As Double = a.Radius / maxR
+
+                    ' Un arco con raggio enorme rispetto all'ingombro del blocco e'
+                    ' di fatto rettilineo: tenerlo come arco genererebbe, una volta
+                    ' scalato, un raggio in pixel spropositato (OOM in GDI+) e archi
+                    ' degeneri in export. Lo declassiamo a segmento.
+                    If Double.IsNaN(nr) OrElse Double.IsInfinity(nr) OrElse nr > 200.0 Then
+                        ns.Add(New ExportLine2D(ns0, ne0))
+                    Else
+                        Dim na As New ExportArc2D(NormBlockPoint(a.Center, cx, cy, maxR),
+                                                  nr,
+                                                  ns0,
+                                                  ne0,
+                                                  a.Clockwise)
+                        na.SweepDeg = a.SweepDeg
+                        ns.Add(na)
+                    End If
                 End If
             Next
             e.Segments = ns
@@ -566,20 +498,6 @@ Public Module ExportGeometry
             pts.Add(New Vec2(a.Center.X + a.Radius * Math.Cos(ang),
                              a.Center.Y + a.Radius * Math.Sin(ang)))
         Next
-    End Sub
-
-    Private Sub AccumulateBounds(p As Vec2, ByRef hasAny As Boolean,
-                                 ByRef minX As Double, ByRef minY As Double,
-                                 ByRef maxX As Double, ByRef maxY As Double)
-        If Not hasAny Then
-            minX = p.X : maxX = p.X : minY = p.Y : maxY = p.Y
-            hasAny = True
-        Else
-            If p.X < minX Then minX = p.X
-            If p.X > maxX Then maxX = p.X
-            If p.Y < minY Then minY = p.Y
-            If p.Y > maxY Then maxY = p.Y
-        End If
     End Sub
 
     Private Function DistTo(p As Vec2, cx As Double, cy As Double) As Double
@@ -712,27 +630,6 @@ Public Module ExportGeometry
         End Select
     End Function
 
-    Private Function BuildInnerArcCellPath(cell As VoronoiCell,
-                                           insetWorld As Single,
-                                           cornerTrim As Single) As ExportPath2D
-        Dim basePoly = GetInsetOrBasePolygon(cell.Vertices, insetWorld)
-        Return BuildFilletPathFromPolygon(basePoly, cornerTrim)
-    End Function
-
-    Private Function BuildInnerBezierCellPath(cell As VoronoiCell,
-                                              insetWorld As Single,
-                                              cornerTrim As Single,
-                                              bezierBulge As Single) As ExportPath2D
-        Dim basePoly = GetInsetOrBasePolygon(cell.Vertices, insetWorld)
-        Return BuildBezierPathFromPolygon(basePoly, cornerTrim, bezierBulge)
-    End Function
-
-    ' Contorno celle a spigolo vivo: poligono di offset senza raccordi.
-    Private Function BuildInnerSharpCellPath(cell As VoronoiCell,
-                                             insetWorld As Single) As ExportPath2D
-        Dim basePoly = GetInsetOrBasePolygon(cell.Vertices, insetWorld)
-        Return BuildPathFromPolygon(basePoly)
-    End Function
 
     ' Anelli di offset interno della cella, puliti (via Clipper).
     ' Offset ~0 => poligono base. Puo' restituire piu' anelli o nessuno.
@@ -746,25 +643,6 @@ Public Module ExportGeometry
         Return VoronoiEngine.OffsetPolygon(vertices, -CDbl(insetWorld))
     End Function
 
-    Private Function GetInsetOrBasePolygon(vertices As List(Of Vec2), insetWorld As Single) As List(Of Vec2)
-        Dim basePoly As List(Of Vec2)
-
-        If insetWorld <= 0.0001F Then
-            basePoly = New List(Of Vec2)(vertices)
-        Else
-            Dim safeInset = Math.Min(CDbl(insetWorld), GetMaxUsableInset(vertices))
-            If safeInset <= 0.0001 Then
-                basePoly = New List(Of Vec2)(vertices)
-            Else
-                basePoly = BuildInsetPolygon(vertices, safeInset)
-                If basePoly Is Nothing OrElse basePoly.Count < 3 Then
-                    basePoly = New List(Of Vec2)(vertices)
-                End If
-            End If
-        End If
-
-        Return basePoly
-    End Function
 
     Private Function BuildPathFromPolygon(points As List(Of Vec2)) As ExportPath2D
         Dim path As New ExportPath2D()
@@ -1009,58 +887,6 @@ Public Module ExportGeometry
         Return minDist
     End Function
 
-    Private Function GetMaxUsableInset(vertices As List(Of Vec2)) As Double
-        Dim c = Geo2D.PolygonCentroid(vertices)
-        Dim minDist As Double = Double.MaxValue
-
-        For i As Integer = 0 To vertices.Count - 1
-            Dim a = vertices(i)
-            Dim b = vertices((i + 1) Mod vertices.Count)
-            Dim d = Geo2D.PointLineDistance(c, a, b)
-            If d < minDist Then minDist = d
-        Next
-
-        Return Math.Max(0.0, minDist * 0.92)
-    End Function
-
-    Private Function BuildInsetPolygon(vertices As List(Of Vec2), offset As Double) As List(Of Vec2)
-        Dim result As New List(Of Vec2)
-        Dim area = Geo2D.SignedArea(vertices)
-        If Math.Abs(area) < 0.0000001 Then Return result
-
-        Dim isCCW As Boolean = area > 0.0
-        Dim n = vertices.Count
-
-        For i As Integer = 0 To n - 1
-            Dim a1, a2, b1, b2 As Vec2
-
-            ShiftEdgeInward(vertices(i), vertices((i + 1) Mod n), offset, isCCW, a1, a2)
-            ShiftEdgeInward(vertices((i + 1) Mod n), vertices((i + 2) Mod n), offset, isCCW, b1, b2)
-
-            result.Add(Geo2D.IntersectLines(a1, a2, b1, b2))
-        Next
-
-        Return result
-    End Function
-
-    Private Sub ShiftEdgeInward(p1 As Vec2,
-                                p2 As Vec2,
-                                offset As Double,
-                                isCCW As Boolean,
-                                ByRef q1 As Vec2,
-                                ByRef q2 As Vec2)
-        Dim dir = Geo2D.Normalize(p2 - p1)
-        Dim inward As Vec2
-
-        If isCCW Then
-            inward = New Vec2(-dir.Y, dir.X)
-        Else
-            inward = New Vec2(dir.Y, -dir.X)
-        End If
-
-        q1 = p1 + inward * offset
-        q2 = p2 + inward * offset
-    End Sub
 
     Private Function GetEffectiveRenderStyle(canvas As VoronoiCanvas, cell As VoronoiCell) As CellRenderStyle
         If canvas.RenderStyle <> CellRenderStyle.Random Then Return canvas.RenderStyle

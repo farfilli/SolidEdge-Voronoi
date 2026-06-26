@@ -21,11 +21,6 @@ Public Enum CellRenderStyle
     BlockSymbol
 End Enum
 
-Public Enum InnerCornerStyle
-    Bezier
-    Arc
-End Enum
-
 Public Enum SymbolCornerStyle
     Sharp
     Bezier
@@ -46,7 +41,6 @@ Public Class VoronoiCanvas
     Public Property SketchDomains As New List(Of CanvasSketchDomain)
     Public Property ConstrainSeedsToSketchDomains As Boolean = False
 
-    Public Property BlockSymbolLoops As New List(Of List(Of Vec2))
 
     ' Blocchi importati da Solid Edge, come definizioni a primitive (linee/archi).
     ' Lo stile BlockSymbol ne piazza uno per cella, scelto in modo stabile.
@@ -81,9 +75,6 @@ Public Class VoronoiCanvas
     Public Property CellScale As Single = 0.82F
     Public Property RandomRotation As Boolean = True
 
-    Public Property SymbolCornerMode As SymbolCornerStyle = SymbolCornerStyle.Sharp
-    Public Property SymbolCornerTrim As Single = 0.18F
-    Public Property SymbolBezierBulge As Single = 0.55F
 
     ' --- Sistema vertici UNICO (sostituisce InnerCornerMode/SymbolCornerMode) ---
     ' Una sola modalita' applicata sia ai simboli sia al contorno celle (Curved):
@@ -101,11 +92,8 @@ Public Class VoronoiCanvas
     Public Property HitRadius As Single = 10.0F
 
     Public Property InnerOffset As Single = 0.0F
-    Public Property CornerTrim As Single = 0.22F
-    Public Property BezierBulge As Single = 0.55F
     Public Property InnerCurveWidth As Single = 1.8F
 
-    Public Property InnerCornerMode As InnerCornerStyle = InnerCornerStyle.Bezier
 
     Private dragSeedIndex As Integer = -1
     Private hoverSeedIndex As Integer = -1
@@ -212,70 +200,6 @@ Public Class VoronoiCanvas
         End Using
     End Sub
 
-    'Private Sub DrawCells(g As Graphics, view As ViewInfo)
-    '    If Cells Is Nothing OrElse Cells.Count = 0 Then Return
-
-    '    Using outerPen As New Pen(Color.FromArgb(210, 180, 245, 240), 1.2F)
-    '        For i As Integer = 0 To Cells.Count - 1
-    '            Dim cell = Cells(i)
-    '            If cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Continue For
-
-    '            Dim outerPts(cell.Vertices.Count - 1) As PointF
-    '            For k As Integer = 0 To cell.Vertices.Count - 1
-    '                outerPts(k) = WorldToScreen(cell.Vertices(k), view)
-    '            Next
-
-    '            If FillCells Then
-    '                Using br As New SolidBrush(GetCellColor(i, 42))
-    '                    g.FillPolygon(br, outerPts)
-    '                End Using
-    '            End If
-
-    '            Dim effectiveStyle As CellRenderStyle = GetEffectiveRenderStyle(i)
-
-    '            Select Case effectiveStyle
-    '                Case CellRenderStyle.Straight
-    '                    If ShowOuterEdges Then
-    '                        g.DrawPolygon(outerPen, outerPts)
-    '                    End If
-
-    '                Case CellRenderStyle.Curved
-    '                    If ShowOuterEdges Then
-    '                        g.DrawPolygon(Pens.DimGray, outerPts)
-    '                    End If
-
-    '                    If ShowInnerCurve Then
-    '                        Using path As GraphicsPath = BuildInnerRoundedPath(cell.Vertices, view, InnerOffset, CornerTrim, BezierBulge)
-    '                            If path IsNot Nothing Then
-    '                                Using innerPen As New Pen(GetCellColor(i, 235), InnerCurveWidth)
-    '                                    innerPen.LineJoin = LineJoin.Round
-    '                                    innerPen.StartCap = LineCap.Round
-    '                                    innerPen.EndCap = LineCap.Round
-    '                                    g.DrawPath(innerPen, path)
-    '                                End Using
-    '                            End If
-    '                        End Using
-    '                    End If
-
-    '                Case Else
-    '                    If ShowOuterEdges Then
-    '                        g.DrawPolygon(Pens.DimGray, outerPts)
-    '                    End If
-
-    '                    Using path As GraphicsPath = BuildSymbolPath(cell, view, effectiveStyle, CellScale, RandomRotation, i)
-    '                        If path IsNot Nothing Then
-    '                            Using symbolPen As New Pen(GetCellColor(i, 240), InnerCurveWidth)
-    '                                symbolPen.LineJoin = LineJoin.Round
-    '                                symbolPen.StartCap = LineCap.Round
-    '                                symbolPen.EndCap = LineCap.Round
-    '                                g.DrawPath(symbolPen, path)
-    '                            End Using
-    '                        End If
-    '                    End Using
-    '            End Select
-    '        Next
-    '    End Using
-    'End Sub
 
     Private Sub DrawCells(g As Graphics, view As ViewInfo)
         If Cells Is Nothing OrElse Cells.Count = 0 Then Return
@@ -345,14 +269,19 @@ Public Class VoronoiCanvas
         For Each seg In wp.Segments
             If TypeOf seg Is ExportLine2D Then
                 Dim ln = DirectCast(seg, ExportLine2D)
-                path.AddLine(WorldToScreen(ln.P1, view), WorldToScreen(ln.P2, view))
+                Dim a = WorldToScreen(ln.P1, view)
+                Dim b = WorldToScreen(ln.P2, view)
+                If IsFinitePt(a) AndAlso IsFinitePt(b) Then path.AddLine(a, b)
 
             ElseIf TypeOf seg Is ExportCubicBezier2D Then
                 Dim bz = DirectCast(seg, ExportCubicBezier2D)
-                path.AddBezier(WorldToScreen(bz.P0, view),
-                               WorldToScreen(bz.C1, view),
-                               WorldToScreen(bz.C2, view),
-                               WorldToScreen(bz.P3, view))
+                Dim p0 = WorldToScreen(bz.P0, view)
+                Dim k1 = WorldToScreen(bz.C1, view)
+                Dim k2 = WorldToScreen(bz.C2, view)
+                Dim p3 = WorldToScreen(bz.P3, view)
+                If IsFinitePt(p0) AndAlso IsFinitePt(k1) AndAlso IsFinitePt(k2) AndAlso IsFinitePt(p3) Then
+                    path.AddBezier(p0, k1, k2, p3)
+                End If
 
             ElseIf TypeOf seg Is ExportArc2D Then
                 AddWorldArc(path, DirectCast(seg, ExportArc2D), view)
@@ -374,8 +303,20 @@ Public Class VoronoiCanvas
         Dim ept = WorldToScreen(arc.EndPoint, view)
         Dim rPx As Single = CSng(arc.Radius * view.Scale)
 
-        If rPx <= 0.01F Then
-            path.AddLine(s, ept)
+        ' DIFESA ANTI-OOM. Un arco con coordinate non finite (NaN/Infinito) o con
+        ' raggio in pixel spropositato (es. arco quasi rettilineo a raggio enorme,
+        ' tipico di geometria importata da SE) fa esplodere il flattening di GDI+
+        ' su DrawPath (OutOfMemoryException). In tutti questi casi l'arco e' di
+        ' fatto un segmento: lo tracciamo come linea. Il tetto e' molto largo
+        ' (8x la dimensione del canvas) per non toccare gli archi legittimi.
+        Dim maxRPx As Single = CSng((Math.Max(ClientSize.Width, ClientSize.Height) + 1) * 8)
+        Dim arcUnusable As Boolean =
+            Not (IsFinitePt(c) AndAlso IsFinitePt(s) AndAlso IsFinitePt(ept)) OrElse
+            Single.IsNaN(rPx) OrElse Single.IsInfinity(rPx) OrElse
+            rPx <= 0.01F OrElse rPx > maxRPx
+
+        If arcUnusable Then
+            If IsFinitePt(s) AndAlso IsFinitePt(ept) Then path.AddLine(s, ept)
             Return
         End If
 
@@ -397,137 +338,21 @@ Public Class VoronoiCanvas
             End While
         End If
 
+        If Double.IsNaN(startAngle) OrElse Double.IsNaN(sweep) OrElse Double.IsInfinity(sweep) Then
+            path.AddLine(s, ept)
+            Return
+        End If
+
         Dim rect As New RectangleF(c.X - rPx, c.Y - rPx, rPx * 2.0F, rPx * 2.0F)
         path.AddArc(rect, CSng(startAngle), CSng(sweep))
     End Sub
 
-    'Private Function BuildSymbolPath(cell As VoronoiCell,
-    '                                 view As ViewInfo,
-    '                                 style As CellRenderStyle,
-    '                                 scaleFactor As Single,
-    '                                 randomRotation As Boolean, cellIndex As Integer) As GraphicsPath
-
-    '    If cell Is Nothing OrElse cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Return Nothing
-
-    '    Dim c As Vec2 = Geo2D.PolygonCentroid(cell.Vertices)
-    '    Dim radius As Double = GetInscribedRadius(cell.Vertices, c)
-    '    If radius <= 0.0001 Then Return Nothing
-
-    '    radius *= Math.Max(0.05, Math.Min(1.5, scaleFactor))
-
-    '    'Dim angle As Double = 0.0
-    '    'If randomRotation Then
-    '    '    angle = GetStableAngleFromSeed(cell.Seed)
-    '    'End If
-
-    '    Dim angle As Double = 0.0
-    '    If randomRotation Then
-    '        angle = GetStableAngleFromKey(cellIndex)
-    '    End If
-
-    '    Dim center As PointF = WorldToScreen(c, view)
-    '    Dim radiusPx As Single = CSng(radius * view.Scale)
-
-    '    Select Case style
-    '        Case CellRenderStyle.Circle
-    '            Return BuildCirclePath(center, radiusPx)
-
-    '        Case CellRenderStyle.Square
-    '            Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 4, angle))
-
-    '        Case CellRenderStyle.RoundedSquare
-    '            Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 4, angle))
-
-    '        Case CellRenderStyle.Triangle
-    '            Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 3, angle - Math.PI / 2.0))
-
-    '        Case CellRenderStyle.Pentagon
-    '            Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 5, angle - Math.PI / 2.0))
-
-    '        Case CellRenderStyle.Hexagon
-    '            Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 6, angle))
-
-    '        Case CellRenderStyle.Octagon
-    '            Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 8, angle))
-
-    '        Case CellRenderStyle.Star
-    '            Return BuildCorneredSymbolPath(BuildStarPoints(center, radiusPx, 5, 0.46F, angle - Math.PI / 2.0))
-
-    '        Case CellRenderStyle.Star3
-    '            Return BuildCorneredSymbolPath(BuildStarPoints(center, radiusPx, 3, 0.3F, angle - Math.PI / 2.0))
-    '        Case CellRenderStyle.Star4
-    '            Return BuildCorneredSymbolPath(BuildStarPoints(center, radiusPx, 4, 0.45F, angle - Math.PI / 4.0))
-
-    '        Case CellRenderStyle.BlockSymbol
-    '            Return BuildBlockSymbolPath(center, radiusPx, angle)
-
-    '        Case Else
-    '            Return Nothing
-    '    End Select
-    'End Function
-
-
-    Private Function BuildSymbolPath(cell As VoronoiCell,
-                                 view As ViewInfo,
-                                 style As CellRenderStyle,
-                                 scaleFactor As Single,
-                                 randomRotation As Boolean,
-                                 cellIndex As Integer) As GraphicsPath
-
-        If cell Is Nothing OrElse cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Return Nothing
-
-        Dim c As Vec2 = Geo2D.PolygonCentroid(cell.Vertices)
-        Dim radius As Double = GetInscribedRadius(cell.Vertices, c)
-        If radius <= 0.0001 Then Return Nothing
-
-        radius *= Math.Max(MinCellScale, Math.Min(MaxCellScale, scaleFactor))
-
-        Dim angle As Double = 0.0
-        If randomRotation Then
-            angle = GetStableAngleByIndex(cellIndex)
-        End If
-
-        Dim center As PointF = WorldToScreen(c, view)
-        Dim radiusPx As Single = CSng(radius * view.Scale)
-
-        Select Case style
-            Case CellRenderStyle.Circle
-                Return BuildCirclePath(center, radiusPx)
-
-            Case CellRenderStyle.Square
-                Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 4, angle))
-
-            Case CellRenderStyle.RoundedSquare
-                Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 4, angle))
-
-            Case CellRenderStyle.Triangle
-                Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 3, angle - Math.PI / 2.0))
-
-            Case CellRenderStyle.Pentagon
-                Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 5, angle - Math.PI / 2.0))
-
-            Case CellRenderStyle.Hexagon
-                Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 6, angle))
-
-            Case CellRenderStyle.Octagon
-                Return BuildCorneredSymbolPath(BuildRegularPolygonPoints(center, radiusPx, 8, angle))
-
-            Case CellRenderStyle.Star
-                Return BuildCorneredSymbolPath(BuildStarPoints(center, radiusPx, 5, 0.46F, angle - Math.PI / 2.0))
-
-            Case CellRenderStyle.Star3
-                Return BuildCorneredSymbolPath(BuildStarPoints(center, radiusPx, 3, 0.3F, angle - Math.PI / 2.0))
-
-            Case CellRenderStyle.Star4
-                Return BuildCorneredSymbolPath(BuildStarPoints(center, radiusPx, 4, 0.45F, angle - Math.PI / 4.0))
-
-            Case CellRenderStyle.BlockSymbol
-                Return BuildBlockSymbolPath(center, radiusPx, angle)
-
-            Case Else
-                Return Nothing
-        End Select
+    ' Vero se entrambe le coordinate sono finite (no NaN / Infinito).
+    Private Function IsFinitePt(p As PointF) As Boolean
+        Return Not (Single.IsNaN(p.X) OrElse Single.IsInfinity(p.X) OrElse
+                    Single.IsNaN(p.Y) OrElse Single.IsInfinity(p.Y))
     End Function
+
 
 
     Private Sub EnsureCellScaleCount(requiredCount As Integer)
@@ -574,470 +399,6 @@ Public Class VoronoiCanvas
         Return style <> CellRenderStyle.Straight AndAlso style <> CellRenderStyle.Curved
     End Function
 
-    Private Function GetStableAngleByIndex(cellIndex As Integer) As Double
-        Dim key As Integer = cellIndex * 104729 + 17
-
-        If SeedStyleKeys IsNot Nothing AndAlso cellIndex >= 0 AndAlso cellIndex < SeedStyleKeys.Count Then
-            key = SeedStyleKeys(cellIndex)
-        End If
-
-        Dim v As Double = Math.Abs(key * 0.61803398875)
-        Dim frac As Double = v - Math.Floor(v)
-        Return frac * Math.PI * 2.0
-    End Function
-
-
-    Private Function GetStableAngleFromKey(cellIndex As Integer) As Double
-        Dim key As Integer = 0
-        If SeedStyleKeys IsNot Nothing AndAlso cellIndex >= 0 AndAlso cellIndex < SeedStyleKeys.Count Then
-            key = SeedStyleKeys(cellIndex)
-        End If
-
-        Dim v As Double = Math.Abs(key * 0.61803398875)
-        Dim frac As Double = v - Math.Floor(v)
-        Return frac * Math.PI * 2.0
-    End Function
-
-    Private Function BuildBlockSymbolPath(center As PointF,
-                                      radiusPx As Single,
-                                      angle As Double) As GraphicsPath
-
-        If BlockSymbolLoops Is Nothing OrElse BlockSymbolLoops.Count = 0 Then Return Nothing
-
-        Dim path As New GraphicsPath()
-        Dim cosA As Double = Math.Cos(angle)
-        Dim sinA As Double = Math.Sin(angle)
-
-        For Each loopPts In BlockSymbolLoops
-            If loopPts Is Nothing OrElse loopPts.Count < 2 Then Continue For
-
-            Dim pts As New List(Of PointF)
-            For Each p In loopPts
-                Dim rx As Double = p.X * cosA - p.Y * sinA
-                Dim ry As Double = p.X * sinA + p.Y * cosA
-
-                pts.Add(New PointF(
-                center.X + CSng(rx * radiusPx),
-                center.Y + CSng(ry * radiusPx)
-            ))
-            Next
-
-            If pts.Count >= 3 Then
-                path.AddPolygon(pts.ToArray())
-            ElseIf pts.Count = 2 Then
-                path.StartFigure()
-                path.AddLine(pts(0), pts(1))
-            End If
-        Next
-
-        Return path
-    End Function
-
-    Private Function BuildCorneredSymbolPath(points As List(Of PointF)) As GraphicsPath
-        If points Is Nothing OrElse points.Count < 3 Then Return Nothing
-
-        Select Case SymbolCornerMode
-            Case SymbolCornerStyle.Bezier
-                Return BuildBezierClosedPath(points, SymbolCornerTrim, SymbolBezierBulge)
-
-            Case SymbolCornerStyle.FilletArc
-                Return BuildFilletArcClosedPath(points, SymbolCornerTrim)
-
-            Case Else
-                Dim path As New GraphicsPath()
-                path.AddPolygon(points.ToArray())
-                Return path
-        End Select
-    End Function
-
-    Private Function BuildCirclePath(center As PointF, radius As Single) As GraphicsPath
-        Dim path As New GraphicsPath()
-        path.AddEllipse(center.X - radius, center.Y - radius, radius * 2, radius * 2)
-        Return path
-    End Function
-
-    Private Function BuildRegularPolygonPoints(center As PointF,
-                                               radius As Single,
-                                               sides As Integer,
-                                               angleOffset As Double) As List(Of PointF)
-        Dim pts As New List(Of PointF)
-        If sides < 3 Then Return pts
-
-        For i As Integer = 0 To sides - 1
-            Dim a = angleOffset + i * (2.0 * Math.PI / sides)
-            pts.Add(New PointF(
-                center.X + CSng(Math.Cos(a) * radius),
-                center.Y + CSng(Math.Sin(a) * radius)
-            ))
-        Next
-
-        Return pts
-    End Function
-
-    Private Function BuildStarPoints(center As PointF,
-                                     radius As Single,
-                                     pointsCount As Integer,
-                                     innerRatio As Single,
-                                     angleOffset As Double) As List(Of PointF)
-        Dim pts As New List(Of PointF)
-        If pointsCount < 3 Then Return pts
-
-        Dim total As Integer = pointsCount * 2
-
-        For i As Integer = 0 To total - 1
-            Dim rr As Single = If(i Mod 2 = 0, radius, radius * innerRatio)
-            Dim a = angleOffset + i * (Math.PI / pointsCount)
-
-            pts.Add(New PointF(
-                center.X + CSng(Math.Cos(a) * rr),
-                center.Y + CSng(Math.Sin(a) * rr)
-            ))
-        Next
-
-        Return pts
-    End Function
-
-    'Private Function GetStableAngleFromSeed(seed As Vec2) As Double
-    '    Dim v = Math.Abs(seed.X * 12.9898 + seed.Y * 78.233)
-    '    Dim frac = v - Math.Floor(v)
-    '    Return frac * Math.PI * 2.0
-    'End Function
-
-    Private Function GetInscribedRadius(vertices As List(Of Vec2), c As Vec2) As Double
-        Dim minDist As Double = Double.MaxValue
-
-        For i As Integer = 0 To vertices.Count - 1
-            Dim a = vertices(i)
-            Dim b = vertices((i + 1) Mod vertices.Count)
-            Dim d = Geo2D.PointLineDistance(c, a, b)
-            If d < minDist Then minDist = d
-        Next
-
-        Return minDist
-    End Function
-
-    Private Function BuildInnerRoundedPath(vertices As List(Of Vec2),
-                                           view As ViewInfo,
-                                           insetWorld As Single,
-                                           cornerTrim As Single,
-                                           bezierBulge As Single) As GraphicsPath
-
-        If vertices Is Nothing OrElse vertices.Count < 3 Then Return Nothing
-
-        Dim basePoly As List(Of Vec2)
-
-        If insetWorld <= 0.0001F Then
-            basePoly = New List(Of Vec2)(vertices)
-        Else
-            Dim safeInset = Math.Min(CDbl(insetWorld), GetMaxUsableInset(vertices))
-            If safeInset <= 0.0001 Then
-                basePoly = New List(Of Vec2)(vertices)
-            Else
-                basePoly = BuildInsetPolygon(vertices, safeInset)
-                If basePoly Is Nothing OrElse basePoly.Count < 3 Then
-                    basePoly = New List(Of Vec2)(vertices)
-                End If
-            End If
-        End If
-
-        If basePoly Is Nothing OrElse basePoly.Count < 3 Then Return Nothing
-
-        Dim screenPts As New List(Of PointF)
-        For Each p In basePoly
-            screenPts.Add(WorldToScreen(p, view))
-        Next
-
-        If InnerCornerMode = InnerCornerStyle.Arc Then
-            Return BuildFilletArcClosedPath(screenPts, cornerTrim)
-        Else
-            Return BuildBezierClosedPath(screenPts, cornerTrim, bezierBulge)
-        End If
-    End Function
-
-    Private Function GetMaxUsableInset(vertices As List(Of Vec2)) As Double
-        If vertices Is Nothing OrElse vertices.Count < 3 Then Return 0.0
-
-        Dim c = Geo2D.PolygonCentroid(vertices)
-        Dim minDist As Double = Double.MaxValue
-
-        For i As Integer = 0 To vertices.Count - 1
-            Dim a = vertices(i)
-            Dim b = vertices((i + 1) Mod vertices.Count)
-            Dim d = Geo2D.PointLineDistance(c, a, b)
-            If d < minDist Then minDist = d
-        Next
-
-        Return Math.Max(0.0, minDist * 0.92)
-    End Function
-
-    Private Function BuildInsetPolygon(vertices As List(Of Vec2), offset As Double) As List(Of Vec2)
-        Dim result As New List(Of Vec2)
-        If vertices Is Nothing OrElse vertices.Count < 3 Then Return result
-
-        Dim area = Geo2D.SignedArea(vertices)
-        If Math.Abs(area) < 0.0000001 Then Return result
-
-        Dim isCCW As Boolean = area > 0.0
-        Dim n = vertices.Count
-
-        For i As Integer = 0 To n - 1
-            Dim a1, a2, b1, b2 As Vec2
-
-            ShiftEdgeInward(vertices(i),
-                            vertices((i + 1) Mod n),
-                            offset,
-                            isCCW,
-                            a1,
-                            a2)
-
-            ShiftEdgeInward(vertices((i + 1) Mod n),
-                            vertices((i + 2) Mod n),
-                            offset,
-                            isCCW,
-                            b1,
-                            b2)
-
-            result.Add(Geo2D.IntersectLines(a1, a2, b1, b2))
-        Next
-
-        Return result
-    End Function
-
-    Private Sub ShiftEdgeInward(p1 As Vec2,
-                                p2 As Vec2,
-                                offset As Double,
-                                isCCW As Boolean,
-                                ByRef q1 As Vec2,
-                                ByRef q2 As Vec2)
-
-        Dim dir = Geo2D.Normalize(p2 - p1)
-        Dim inward As Vec2
-
-        If isCCW Then
-            inward = New Vec2(-dir.Y, dir.X)
-        Else
-            inward = New Vec2(dir.Y, -dir.X)
-        End If
-
-        q1 = p1 + inward * offset
-        q2 = p2 + inward * offset
-    End Sub
-
-    Private Function BuildBezierClosedPath(points As List(Of PointF),
-                                           cornerTrim As Single,
-                                           bezierBulge As Single) As GraphicsPath
-
-        Dim path As New GraphicsPath()
-
-        If points Is Nothing OrElse points.Count < 3 Then Return path
-
-        Dim n As Integer = points.Count
-
-        If cornerTrim <= 0.0001F Then
-            path.AddPolygon(points.ToArray())
-            Return path
-        End If
-
-        Dim pIn(n - 1) As PointF
-        Dim pOut(n - 1) As PointF
-        Dim c1(n - 1) As PointF
-        Dim c2(n - 1) As PointF
-
-        Dim trimFactor As Single = Math.Max(0.0F, cornerTrim)
-        Dim bulgeFactor As Single = Math.Max(0.0F, bezierBulge)
-
-        For i As Integer = 0 To n - 1
-            Dim prev As PointF = points((i - 1 + n) Mod n)
-            Dim curr As PointF = points(i)
-            Dim [next] As PointF = points((i + 1) Mod n)
-
-            Dim dirToPrev As PointF = NormalizePoint(New PointF(prev.X - curr.X, prev.Y - curr.Y))
-            Dim dirToNext As PointF = NormalizePoint(New PointF([next].X - curr.X, [next].Y - curr.Y))
-
-            Dim lenIn As Single = DistancePoint(prev, curr)
-            Dim lenOut As Single = DistancePoint(curr, [next])
-            Dim minLen As Single = Math.Min(lenIn, lenOut)
-
-            Dim trim As Single
-            If trimFactor <= 1.0F Then
-                trim = minLen * trimFactor * 0.5F
-            Else
-                trim = minLen * (1.0F - CSng(1.0 / (1.0 + trimFactor)))
-            End If
-
-            trim = Math.Min(trim, minLen * 0.49F)
-
-            pIn(i) = New PointF(curr.X + dirToPrev.X * trim, curr.Y + dirToPrev.Y * trim)
-            pOut(i) = New PointF(curr.X + dirToNext.X * trim, curr.Y + dirToNext.Y * trim)
-
-            Dim handleLen As Single = trim * bulgeFactor
-
-            c1(i) = New PointF(pIn(i).X - dirToPrev.X * handleLen, pIn(i).Y - dirToPrev.Y * handleLen)
-            c2(i) = New PointF(pOut(i).X - dirToNext.X * handleLen, pOut(i).Y - dirToNext.Y * handleLen)
-        Next
-
-        path.StartFigure()
-        path.AddLine(pOut(n - 1), pIn(0))
-
-        For i As Integer = 0 To n - 1
-            path.AddBezier(pIn(i), c1(i), c2(i), pOut(i))
-            Dim ni As Integer = (i + 1) Mod n
-            path.AddLine(pOut(i), pIn(ni))
-        Next
-
-        path.CloseFigure()
-        Return path
-    End Function
-
-    Private Function BuildFilletArcClosedPath(points As List(Of PointF),
-                                              cornerTrim As Single) As GraphicsPath
-
-        Dim path As New GraphicsPath()
-        If points Is Nothing OrElse points.Count < 3 Then Return path
-
-        Dim n As Integer = points.Count
-
-        If cornerTrim <= 0.0001F Then
-            path.AddPolygon(points.ToArray())
-            Return path
-        End If
-
-        Dim tanA(n - 1) As PointF
-        Dim tanB(n - 1) As PointF
-        Dim arcCenter(n - 1) As PointF
-        Dim arcRadius(n - 1) As Single
-        Dim hasArc(n - 1) As Boolean
-
-        For i As Integer = 0 To n - 1
-            Dim prev As PointF = points((i - 1 + n) Mod n)
-            Dim curr As PointF = points(i)
-            Dim [next] As PointF = points((i + 1) Mod n)
-
-            Dim u1 As PointF = NormalizePoint(New PointF(prev.X - curr.X, prev.Y - curr.Y))
-            Dim u2 As PointF = NormalizePoint(New PointF([next].X - curr.X, [next].Y - curr.Y))
-
-            Dim len1 As Single = DistancePoint(prev, curr)
-            Dim len2 As Single = DistancePoint(curr, [next])
-            Dim minLen As Single = Math.Min(len1, len2)
-
-            Dim trim As Single
-            If cornerTrim <= 1.0F Then
-                trim = minLen * cornerTrim * 0.5F
-            Else
-                trim = minLen * (1.0F - CSng(1.0 / (1.0 + cornerTrim)))
-            End If
-
-            If points.Count >= 8 Then
-                trim = Math.Min(trim, minLen * 0.3F)
-            Else
-                trim = Math.Min(trim, minLen * 0.49F)
-            End If
-
-            tanA(i) = New PointF(curr.X + u1.X * trim, curr.Y + u1.Y * trim)
-            tanB(i) = New PointF(curr.X + u2.X * trim, curr.Y + u2.Y * trim)
-
-            Dim dot As Double = Math.Max(-1.0, Math.Min(1.0, u1.X * u2.X + u1.Y * u2.Y))
-            Dim theta As Double = Math.Acos(dot)
-
-            If theta < 0.01 OrElse Math.Abs(Math.PI - theta) < 0.01 Then
-                hasArc(i) = False
-                Continue For
-            End If
-
-            Dim r As Single = CSng(trim * Math.Tan(theta / 2.0))
-            If r <= 0.0001F Then
-                hasArc(i) = False
-                Continue For
-            End If
-
-            Dim bis As PointF = NormalizePoint(New PointF(u1.X + u2.X, u1.Y + u2.Y))
-            If Math.Abs(bis.X) < 0.0001F AndAlso Math.Abs(bis.Y) < 0.0001F Then
-                hasArc(i) = False
-                Continue For
-            End If
-
-            Dim distToCenter As Single = CSng(r / Math.Sin(theta / 2.0))
-            Dim center As New PointF(curr.X + bis.X * distToCenter, curr.Y + bis.Y * distToCenter)
-
-            arcCenter(i) = center
-            arcRadius(i) = r
-            hasArc(i) = True
-        Next
-
-        path.StartFigure()
-        path.AddLine(tanB(n - 1), tanA(0))
-
-        For i As Integer = 0 To n - 1
-            If hasArc(i) Then
-                AddFilletArc(path, arcCenter(i), arcRadius(i), tanA(i), tanB(i), points(i))
-            Else
-                path.AddLine(tanA(i), tanB(i))
-            End If
-
-            Dim ni As Integer = (i + 1) Mod n
-            path.AddLine(tanB(i), tanA(ni))
-        Next
-
-        path.CloseFigure()
-        Return path
-    End Function
-
-    Private Sub AddFilletArc(path As GraphicsPath,
-                             center As PointF,
-                             radius As Single,
-                             startPt As PointF,
-                             endPt As PointF,
-                             vertexPt As PointF)
-
-        Dim a1 As Single = CSng(Math.Atan2(startPt.Y - center.Y, startPt.X - center.X) * 180.0 / Math.PI)
-        Dim a2 As Single = CSng(Math.Atan2(endPt.Y - center.Y, endPt.X - center.X) * 180.0 / Math.PI)
-        Dim av As Single = CSng(Math.Atan2(vertexPt.Y - center.Y, vertexPt.X - center.X) * 180.0 / Math.PI)
-
-        Dim sweep1 As Single = NormalizeAngle(a2 - a1)
-        Dim sweep2 As Single = sweep1 - 360.0F
-
-        Dim contains1 As Boolean = AngleBelongsToSweep(a1, sweep1, av)
-        Dim contains2 As Boolean = AngleBelongsToSweep(a1, sweep2, av)
-
-        Dim rect As New RectangleF(center.X - radius, center.Y - radius, radius * 2.0F, radius * 2.0F)
-
-        If contains1 AndAlso Not contains2 Then
-            path.AddArc(rect, a1, sweep1)
-        ElseIf contains2 AndAlso Not contains1 Then
-            path.AddArc(rect, a1, sweep2)
-        Else
-            If Math.Abs(sweep1) < Math.Abs(sweep2) Then
-                path.AddArc(rect, a1, sweep1)
-            Else
-                path.AddArc(rect, a1, sweep2)
-            End If
-        End If
-    End Sub
-
-    Private Function AngleBelongsToSweep(startAngle As Single,
-                                         sweep As Single,
-                                         testAngle As Single) As Boolean
-        startAngle = NormalizeAngle(startAngle)
-        testAngle = NormalizeAngle(testAngle)
-
-        If sweep >= 0 Then
-            Dim delta As Single = NormalizeAngle(testAngle - startAngle)
-            Return delta <= sweep + 0.001F
-        Else
-            Dim delta As Single = NormalizeAngle(startAngle - testAngle)
-            Return delta <= (-sweep) + 0.001F
-        End If
-    End Function
-
-    Private Function NormalizeAngle(angle As Single) As Single
-        While angle < 0.0F
-            angle += 360.0F
-        End While
-        While angle >= 360.0F
-            angle -= 360.0F
-        End While
-        Return angle
-    End Function
 
     Private Function GetView() As ViewInfo
         Dim pad As Single = 20.0F
@@ -1128,17 +489,6 @@ Public Class VoronoiCanvas
         Return palette(index Mod palette.Length)
     End Function
 
-    Private Function NormalizePoint(v As PointF) As PointF
-        Dim l As Single = CSng(Math.Sqrt(v.X * v.X + v.Y * v.Y))
-        If l < 0.0001F Then Return New PointF(0.0F, 0.0F)
-        Return New PointF(v.X / l, v.Y / l)
-    End Function
-
-    Private Function DistancePoint(a As PointF, b As PointF) As Single
-        Dim dx As Single = a.X - b.X
-        Dim dy As Single = a.Y - b.Y
-        Return CSng(Math.Sqrt(dx * dx + dy * dy))
-    End Function
 
     Private Sub DrawSeeds(g As Graphics, view As ViewInfo)
         If Not ShowSeeds OrElse EditableSeeds Is Nothing Then Return
