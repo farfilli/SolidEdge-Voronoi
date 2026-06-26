@@ -252,12 +252,29 @@ Public Class VoronoiCanvas
                         pen.LineJoin = LineJoin.Round
                         pen.StartCap = LineCap.Round
                         pen.EndCap = LineCap.Round
-                        g.DrawPath(pen, path)
+                        Try
+                            g.DrawPath(pen, path)
+                        Catch
+                            ' Geometria degenere sfuggita ai filtri: si salta
+                            ' questo path senza far crashare il rendering.
+                        End Try
                     End Using
                 End Using
             Next
         Next
     End Sub
+
+    ' Soglia minima di lunghezza disegnabile (pixel). Elementi piu' corti di
+    ' questa vengono saltati: tracciare un segmento/arco di lunghezza ~nulla con
+    ' line cap arrotondati provoca una OutOfMemoryException in GDI+ (bug noto dei
+    ' cap non-Flat). Sotto questa soglia l'elemento e' comunque invisibile.
+    Private Const MinDrawLenPx As Single = 0.3F
+
+    Private Function ScreenDist(a As PointF, b As PointF) As Single
+        Dim dx As Single = a.X - b.X
+        Dim dy As Single = a.Y - b.Y
+        Return CSng(Math.Sqrt(dx * dx + dy * dy))
+    End Function
 
     ' Converte un ExportPath2D world-space in un GraphicsPath in pixel.
     Private Function ToScreenPath(wp As ExportPath2D, view As ViewInfo) As GraphicsPath
@@ -265,13 +282,17 @@ Public Class VoronoiCanvas
 
         Dim path As New GraphicsPath()
         path.StartFigure()
+        Dim added As Boolean = False
 
         For Each seg In wp.Segments
             If TypeOf seg Is ExportLine2D Then
                 Dim ln = DirectCast(seg, ExportLine2D)
                 Dim a = WorldToScreen(ln.P1, view)
                 Dim b = WorldToScreen(ln.P2, view)
-                If IsFinitePt(a) AndAlso IsFinitePt(b) Then path.AddLine(a, b)
+                If IsSanePt(a) AndAlso IsSanePt(b) AndAlso ScreenDist(a, b) >= MinDrawLenPx Then
+                    path.AddLine(a, b)
+                    added = True
+                End If
 
             ElseIf TypeOf seg Is ExportCubicBezier2D Then
                 Dim bz = DirectCast(seg, ExportCubicBezier2D)
@@ -279,55 +300,58 @@ Public Class VoronoiCanvas
                 Dim k1 = WorldToScreen(bz.C1, view)
                 Dim k2 = WorldToScreen(bz.C2, view)
                 Dim p3 = WorldToScreen(bz.P3, view)
-                If IsFinitePt(p0) AndAlso IsFinitePt(k1) AndAlso IsFinitePt(k2) AndAlso IsFinitePt(p3) Then
-                    path.AddBezier(p0, k1, k2, p3)
+                If IsSanePt(p0) AndAlso IsSanePt(k1) AndAlso IsSanePt(k2) AndAlso IsSanePt(p3) Then
+                    ' Lunghezza stimata col poligono di controllo: se ~0, salta.
+                    Dim approx As Single = ScreenDist(p0, k1) + ScreenDist(k1, k2) + ScreenDist(k2, p3)
+                    If approx >= MinDrawLenPx Then
+                        path.AddBezier(p0, k1, k2, p3)
+                        added = True
+                    End If
                 End If
 
             ElseIf TypeOf seg Is ExportArc2D Then
-                AddWorldArc(path, DirectCast(seg, ExportArc2D), view)
+                If AddWorldArc(path, DirectCast(seg, ExportArc2D), view) Then added = True
             End If
         Next
+
+        If Not added Then
+            path.Dispose()
+            Return Nothing
+        End If
 
         If wp.Closed Then path.CloseFigure()
         Return path
     End Function
 
-    ' Disegna un arco world-space su GraphicsPath. Il centro e' noto dal
-    ' builder, quindi si traccia sempre l'arco minore (sweep normalizzato in
-    ' (-180, 180]): copre sia i fillet (angolo centrale < 180) sia i due
-    ' semicerchi del cerchio. Mondo e schermo hanno la stessa orientazione
-    ' (Y verso il basso, scala uniforme), quindi gli angoli si conservano.
-    Private Sub AddWorldArc(path As GraphicsPath, arc As ExportArc2D, view As ViewInfo)
+    ' Disegna un arco world-space su GraphicsPath. Ritorna True se ha aggiunto
+    ' qualcosa di disegnabile, False se l'arco e' stato scartato (degenere). Il
+    ' centro e' noto dal builder: per gli archi importati si usa lo sweep reale
+    ' con segno, per i raccordi/semicerchi l'arco minore.
+    Private Function AddWorldArc(path As GraphicsPath, arc As ExportArc2D, view As ViewInfo) As Boolean
         Dim c = WorldToScreen(arc.Center, view)
         Dim s = WorldToScreen(arc.StartPoint, view)
         Dim ept = WorldToScreen(arc.EndPoint, view)
         Dim rPx As Single = CSng(arc.Radius * view.Scale)
 
-        ' DIFESA ANTI-OOM. Un arco con coordinate non finite (NaN/Infinito) o con
-        ' raggio in pixel spropositato (es. arco quasi rettilineo a raggio enorme,
-        ' tipico di geometria importata da SE) fa esplodere il flattening di GDI+
-        ' su DrawPath (OutOfMemoryException). In tutti questi casi l'arco e' di
-        ' fatto un segmento: lo tracciamo come linea. Il tetto e' molto largo
-        ' (8x la dimensione del canvas) per non toccare gli archi legittimi.
-        Dim maxRPx As Single = CSng((Math.Max(ClientSize.Width, ClientSize.Height) + 1) * 8)
-        Dim arcUnusable As Boolean =
-            Not (IsFinitePt(c) AndAlso IsFinitePt(s) AndAlso IsFinitePt(ept)) OrElse
-            Single.IsNaN(rPx) OrElse Single.IsInfinity(rPx) OrElse
-            rPx <= 0.01F OrElse rPx > maxRPx
+        ' Coordinate non finite o assurdamente fuori scala => spazzatura: scarta.
+        If Not (IsSanePt(c) AndAlso IsSanePt(s) AndAlso IsSanePt(ept)) Then Return False
 
-        If arcUnusable Then
-            If IsFinitePt(s) AndAlso IsFinitePt(ept) Then path.AddLine(s, ept)
-            Return
+        ' Raggio sproporzionato o ~0 => l'arco e' di fatto un segmento.
+        Dim maxRPx As Single = CSng((Math.Max(ClientSize.Width, ClientSize.Height) + 1) * 8)
+        If Single.IsNaN(rPx) OrElse Single.IsInfinity(rPx) OrElse rPx <= 0.01F OrElse rPx > maxRPx Then
+            If ScreenDist(s, ept) >= MinDrawLenPx Then
+                path.AddLine(s, ept)
+                Return True
+            End If
+            Return False
         End If
 
         Dim startAngle As Double = Math.Atan2(s.Y - c.Y, s.X - c.X) * 180.0 / Math.PI
 
         Dim sweep As Double
         If Not Double.IsNaN(arc.SweepDeg) Then
-            ' Arco importato da blocco: sweep reale con segno (anche > 180).
             sweep = arc.SweepDeg
         Else
-            ' Raccordi / semicerchi: arco minore, come prima.
             Dim endAngle As Double = Math.Atan2(ept.Y - c.Y, ept.X - c.X) * 180.0 / Math.PI
             sweep = endAngle - startAngle
             While sweep <= -180.0
@@ -339,18 +363,33 @@ Public Class VoronoiCanvas
         End If
 
         If Double.IsNaN(startAngle) OrElse Double.IsNaN(sweep) OrElse Double.IsInfinity(sweep) Then
-            path.AddLine(s, ept)
-            Return
+            If ScreenDist(s, ept) >= MinDrawLenPx Then
+                path.AddLine(s, ept)
+                Return True
+            End If
+            Return False
         End If
+
+        ' Lunghezza dell'arco in pixel = r * |sweep(rad)|. Se trascurabile lo si
+        ' SALTA: un arco di lunghezza ~nulla con cap arrotondati manda GDI+ in
+        ' OutOfMemoryException. E' la causa del crash con blocchi che hanno archi
+        ' a sweep minuscolo, scalati in celle piccole.
+        Dim arcLenPx As Double = rPx * Math.Abs(sweep) * Math.PI / 180.0
+        If arcLenPx < MinDrawLenPx Then Return False
 
         Dim rect As New RectangleF(c.X - rPx, c.Y - rPx, rPx * 2.0F, rPx * 2.0F)
         path.AddArc(rect, CSng(startAngle), CSng(sweep))
-    End Sub
+        Return True
+    End Function
 
-    ' Vero se entrambe le coordinate sono finite (no NaN / Infinito).
-    Private Function IsFinitePt(p As PointF) As Boolean
-        Return Not (Single.IsNaN(p.X) OrElse Single.IsInfinity(p.X) OrElse
-                    Single.IsNaN(p.Y) OrElse Single.IsInfinity(p.Y))
+    ' Vero se il punto e' finito (no NaN / Infinito) E entro un limite molto
+    ' largo rispetto al canvas. Coordinate oltre questo limite indicano
+    ' geometria degenere che farebbe esplodere GDI+ in fase di disegno.
+    Private Function IsSanePt(p As PointF) As Boolean
+        If Single.IsNaN(p.X) OrElse Single.IsInfinity(p.X) OrElse
+           Single.IsNaN(p.Y) OrElse Single.IsInfinity(p.Y) Then Return False
+        Dim lim As Single = CSng((Math.Max(ClientSize.Width, ClientSize.Height) + 1) * 50)
+        Return Math.Abs(p.X) <= lim AndAlso Math.Abs(p.Y) <= lim
     End Function
 
 

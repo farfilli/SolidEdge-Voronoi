@@ -94,6 +94,7 @@
     <Import Include="System.Threading.Tasks" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="BlockDiagnostics.vb" />
     <Compile Include="DxfExporter.vb" />
     <Compile Include="ExportGeometry.vb" />
     <Compile Include="Geometry.vb" />

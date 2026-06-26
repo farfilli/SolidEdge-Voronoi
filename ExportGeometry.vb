@@ -277,7 +277,7 @@ Public Module ExportGeometry
         If maxR <= 0.000001 Then Return result
 
         ' Scala dal raggio del cerchio equivalente all'area della cella.
-        Dim radius As Double = BlockRadiusFromArea(cell, scaleFactor)
+        Dim radius As Double = BlockRadiusFromArea(cell, scaleFactor, canvas)
 
         ' Ancoraggio: il punto base del blocco coincide col seed della cella.
         Dim anchor As Vec2 = Geo2D.PolygonCentroid(cell.Vertices)
@@ -302,8 +302,21 @@ Public Module ExportGeometry
 
     ' Raggio di scala del blocco in funzione dell'area della cella: raggio del
     ' cerchio di pari area, moltiplicato per il fattore di scala (per-cella/slider).
-    Private Function BlockRadiusFromArea(cell As VoronoiCell, scaleFactor As Single) As Double
+    Private Function BlockRadiusFromArea(cell As VoronoiCell, scaleFactor As Single, canvas As VoronoiCanvas) As Double
         Dim area As Double = Math.Abs(Geo2D.SignedArea(cell.Vertices))
+
+        ' Tetto di sicurezza: una cella non puo' sensatamente essere piu' grande
+        ' del dominio. Celle patologiche (es. artefatti di clipping con fori
+        ' circolari) possono pero' avere area enorme/degenere: senza limite il
+        ' blocco verrebbe scalato a dismisura e un suo arco genererebbe un raggio
+        ' in pixel sterminato => OutOfMemory in GDI+. Limitiamo l'area a quella
+        ' del dominio (sempre finita e ragionevole).
+        If canvas IsNot Nothing Then
+            Dim dom = canvas.Domain
+            Dim domArea As Double = Math.Abs(CDbl(dom.Width) * CDbl(dom.Height))
+            If domArea > 0.0 AndAlso area > domArea Then area = domArea
+        End If
+
         Dim rArea As Double = Math.Sqrt(area / Math.PI)
         Return rArea * Math.Max(0.05, Math.Min(1.5, scaleFactor))
     End Function
@@ -324,7 +337,7 @@ Public Module ExportGeometry
         If def Is Nothing OrElse String.IsNullOrEmpty(def.Name) OrElse def.NativeRadius <= 0.000001 Then Return
 
         Dim maxR As Double = def.NativeRadius
-        Dim radius As Double = BlockRadiusFromArea(cell, scaleFactor)
+        Dim radius As Double = BlockRadiusFromArea(cell, scaleFactor, canvas)
 
         Dim angle As Double = 0.0
         If randomRotation Then angle = GetStableAngleFromKey(canvas, cellIndex)
