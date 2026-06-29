@@ -1,18 +1,15 @@
 ' ============================================================================
-'  DIAGNOSTICA TEMPORANEA BLOCCHI  (rimuovere dopo aver trovato il problema)
+'  DIAGNOSTICA TEMPORANEA BLOCCHI  (v2 - include ellissi/cerchi/archi ellittici)
 '
-'  USO:
-'  1) Incolla l'intero Module qui sotto in un file nuovo del progetto
-'     (es. BlockDiagnostics.vb), oppure incolla le due funzioni dentro
-'     un Module gia' esistente (es. ExportGeometry).
-'
-'  2) In MainForm, dentro ReadBlockDefaultView_Click, sostituisci il blocco:
+'  USO (come prima):
+'  1) Incolla questo Module nel progetto (sostituendo l'eventuale versione v1).
+'  2) In MainForm.ReadBlockDefaultView_Click, al posto del loop:
 '
 '         For Each d In defs
 '             ExportGeometry.NormalizeBlockInPlace(d)
 '         Next
 '
-'     con QUESTO (dumpa grezzo + normalizzato su Desktop\block_diag.txt):
+'     metti:
 '
 '         Dim diag As String = BlockDiag.DescribeBlocks(defs, "RAW (pre-normalize)")
 '         For Each d In defs
@@ -24,8 +21,8 @@
 '         System.IO.File.WriteAllText(diagPath, diag)
 '         MessageBox.Show("Diagnostica scritta in: " & diagPath)
 '
-'  3) Premi "Read Solid Edge Blocks" con APERTO il documento che contiene
-'     il blocco problematico, poi inviami il contenuto di block_diag.txt.
+'  3) Premi "Read Solid Edge Blocks" col documento del blocco-stella aperto e
+'     inviami block_diag.txt.
 ' ============================================================================
 
 Imports System
@@ -50,16 +47,11 @@ Public Module BlockDiag
             sb.AppendLine("")
             sb.AppendLine(String.Format("[{0}] Name='{1}'  entita'={2}",
                                         bi, d.Name, If(d.Entities Is Nothing, 0, d.Entities.Count)))
-            sb.AppendLine(String.Format("    NativeCenter=({0:0.######},{1:0.######})  NativeRadius={2:0.######}  BaseOrigin=({3:0.######},{4:0.######})",
+            sb.AppendLine(String.Format("    NativeCenter=({0:0.###},{1:0.###})  NativeRadius={2:0.###}  BaseOrigin=({3:0.###},{4:0.###})",
                                         d.NativeCenter.X, d.NativeCenter.Y, d.NativeRadius,
                                         d.BaseOrigin.X, d.BaseOrigin.Y))
 
-            Dim nLine As Integer = 0
-            Dim nArc As Integer = 0
-            Dim minX As Double = Double.MaxValue, minY As Double = Double.MaxValue
-            Dim maxX As Double = Double.MinValue, maxY As Double = Double.MinValue
-            Dim worstR As Double = 0.0
-            Dim nonFinite As Integer = 0
+            Dim nLine = 0, nArc = 0, nBez = 0, nEll = 0, nCir = 0, nEArc = 0
 
             If d.Entities IsNot Nothing Then
                 For Each e In d.Entities
@@ -67,73 +59,51 @@ Public Module BlockDiag
                     For Each seg In e.Segments
                         If TypeOf seg Is ExportLine2D Then
                             nLine += 1
-                            Dim ln = DirectCast(seg, ExportLine2D)
-                            Acc(ln.P1, minX, minY, maxX, maxY, nonFinite)
-                            Acc(ln.P2, minX, minY, maxX, maxY, nonFinite)
 
                         ElseIf TypeOf seg Is ExportArc2D Then
                             nArc += 1
                             Dim a = DirectCast(seg, ExportArc2D)
-                            If Not (Double.IsNaN(a.Radius) OrElse Double.IsInfinity(a.Radius)) Then
-                                worstR = Math.Max(worstR, Math.Abs(a.Radius))
-                            Else
-                                nonFinite += 1
-                            End If
-                            Acc(a.Center, minX, minY, maxX, maxY, nonFinite)
-                            Acc(a.StartPoint, minX, minY, maxX, maxY, nonFinite)
-                            Acc(a.EndPoint, minX, minY, maxX, maxY, nonFinite)
-                            sb.AppendLine(String.Format("    ARC  r={0}  sweep={1}  cen=({2:0.###},{3:0.###})  s=({4:0.###},{5:0.###})  e=({6:0.###},{7:0.###})  cw={8}",
-                                FmtNum(a.Radius),
-                                If(Double.IsNaN(a.SweepDeg), "NaN", a.SweepDeg.ToString("0.###")),
-                                a.Center.X, a.Center.Y,
-                                a.StartPoint.X, a.StartPoint.Y,
-                                a.EndPoint.X, a.EndPoint.Y,
-                                a.Clockwise))
+                            sb.AppendLine(String.Format("    ARC      r={0:0.###}  sweep={1}  cen=({2:0.##},{3:0.##})",
+                                a.Radius, If(Double.IsNaN(a.SweepDeg), "NaN", a.SweepDeg.ToString("0.##")),
+                                a.Center.X, a.Center.Y))
 
                         ElseIf TypeOf seg Is ExportCubicBezier2D Then
-                            sb.AppendLine("    BEZIER (inatteso in un blocco)")
+                            nBez += 1
+
+                        ElseIf TypeOf seg Is ExportEllipse2D Then
+                            nEll += 1
+                            Dim el = DirectCast(seg, ExportEllipse2D)
+                            sb.AppendLine(String.Format("    ELLIPSE  cen=({0:0.##},{1:0.##})  rMaj={2:0.###} rMin={3:0.###} rotDeg={4:0.##}",
+                                el.Center.X, el.Center.Y, el.RadiusMajor, el.RadiusMinor, el.RotationRad * 180.0 / Math.PI))
+
+                        ElseIf TypeOf seg Is ExportCircle2D Then
+                            nCir += 1
+                            Dim ci = DirectCast(seg, ExportCircle2D)
+                            sb.AppendLine(String.Format("    CIRCLE   cen=({0:0.##},{1:0.##})  r={2:0.###}",
+                                ci.Center.X, ci.Center.Y, ci.Radius))
+
+                        ElseIf TypeOf seg Is ExportEllipticalArc2D Then
+                            nEArc += 1
+                            Dim ea = DirectCast(seg, ExportEllipticalArc2D)
+                            Dim rMaj = Math.Sqrt(ea.MajorAxis.X * ea.MajorAxis.X + ea.MajorAxis.Y * ea.MajorAxis.Y)
+                            Dim rMin = Math.Sqrt(ea.MinorAxis.X * ea.MinorAxis.X + ea.MinorAxis.Y * ea.MinorAxis.Y)
+                            sb.AppendLine(String.Format("    EARC     cen=({0:0.##},{1:0.##})  rMaj={2:0.###} rMin={3:0.###}",
+                                ea.Center.X, ea.Center.Y, rMaj, rMin))
+                            sb.AppendLine(String.Format("             major=({0:0.###},{1:0.###}) minor=({2:0.###},{3:0.###})  orient={4}",
+                                ea.MajorAxis.X, ea.MajorAxis.Y, ea.MinorAxis.X, ea.MinorAxis.Y, ea.Orientation))
+                            sb.AppendLine(String.Format("             start={0:0.####} rad ({1:0.##} deg)   sweep={2:0.####} rad ({3:0.##} deg)",
+                                ea.StartAngle, ea.StartAngle * 180.0 / Math.PI,
+                                ea.SweepAngle, ea.SweepAngle * 180.0 / Math.PI))
                         End If
                     Next
                 Next
             End If
 
-            Dim extent As Double = 0.0
-            If maxX >= minX AndAlso maxY >= minY Then
-                extent = Math.Sqrt((maxX - minX) * (maxX - minX) + (maxY - minY) * (maxY - minY))
-            End If
-
-            sb.AppendLine(String.Format("    => linee={0}  archi={1}  bbox=({2:0.###},{3:0.###})-({4:0.###},{5:0.###})  diag={6:0.###}  |r|max={7}  nonFinite={8}",
-                                        nLine, nArc, minX, minY, maxX, maxY, extent, FmtNum(worstR), nonFinite))
-
-            ' Segnale d'allarme principale: arco col raggio molto piu' grande
-            ' dell'ingombro del blocco => dopo lo scaling diventa enorme.
-            If extent > 0.0000001 AndAlso worstR / extent > 50.0 Then
-                sb.AppendLine(String.Format("    !!! ATTENZIONE: |r|max/diag = {0:0.#} (arco quasi rettilineo: candidato OOM)", worstR / extent))
-            End If
+            sb.AppendLine(String.Format("    => linee={0} archi={1} bezier={2} ellissi={3} cerchi={4} archiEllittici={5}",
+                                        nLine, nArc, nBez, nEll, nCir, nEArc))
         Next
 
         Return sb.ToString()
     End Function
-
-    Private Function FmtNum(v As Double) As String
-        If Double.IsNaN(v) Then Return "NaN"
-        If Double.IsInfinity(v) Then Return "Inf"
-        Return v.ToString("0.######")
-    End Function
-
-    Private Sub Acc(p As Vec2,
-                    ByRef minX As Double, ByRef minY As Double,
-                    ByRef maxX As Double, ByRef maxY As Double,
-                    ByRef nonFinite As Integer)
-        If Double.IsNaN(p.X) OrElse Double.IsInfinity(p.X) OrElse
-           Double.IsNaN(p.Y) OrElse Double.IsInfinity(p.Y) Then
-            nonFinite += 1
-            Return
-        End If
-        If p.X < minX Then minX = p.X
-        If p.Y < minY Then minY = p.Y
-        If p.X > maxX Then maxX = p.X
-        If p.Y > maxY Then maxY = p.Y
-    End Sub
 
 End Module

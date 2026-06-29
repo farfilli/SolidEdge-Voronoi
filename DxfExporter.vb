@@ -31,6 +31,10 @@ Public Module DxfExporter
                     WriteSplineEntity(sb, DirectCast(seg, ExportCubicBezier2D))
                 ElseIf TypeOf seg Is ExportEllipse2D Then
                     WriteEllipseEntity(sb, DirectCast(seg, ExportEllipse2D))
+                ElseIf TypeOf seg Is ExportCircle2D Then
+                    WriteCircleEntity(sb, DirectCast(seg, ExportCircle2D))
+                ElseIf TypeOf seg Is ExportEllipticalArc2D Then
+                    WriteEllipticalArcEntity(sb, DirectCast(seg, ExportEllipticalArc2D))
                 End If
             Next
         Next
@@ -41,6 +45,32 @@ Public Module DxfExporter
         sb.AppendLine("EOF")
 
         File.WriteAllText(filePath, sb.ToString(), Encoding.ASCII)
+    End Sub
+
+    Private Sub WriteEllipticalArcEntity(sb As StringBuilder, ea As ExportEllipticalArc2D)
+        ' Campionato in segmenti LINE: evita ambiguita' su parametri/verso
+        ' dell'entita' ELLIPSE parziale del DXF.
+        Dim pts = ExportGeometry.SampleEllipticalArc(ea.Center, ea.MajorAxis, ea.MinorAxis, ea.StartAngle, ea.SweepAngle, ea.Orientation)
+        For i As Integer = 0 To pts.Count - 2
+            WriteLineEntity(sb, New ExportLine2D(pts(i), pts(i + 1)))
+        Next
+    End Sub
+
+    Private Sub WriteCircleEntity(sb As StringBuilder, ci As ExportCircle2D)
+        Dim c = FlipX(ci.Center)
+
+        sb.AppendLine("0")
+        sb.AppendLine("CIRCLE")
+        sb.AppendLine("8")
+        sb.AppendLine("0")
+        sb.AppendLine("10")
+        sb.AppendLine(F(c.X))
+        sb.AppendLine("20")
+        sb.AppendLine(F(c.Y))
+        sb.AppendLine("30")
+        sb.AppendLine("0")
+        sb.AppendLine("40")
+        sb.AppendLine(F(ci.Radius))
     End Sub
 
     Private Sub WriteEllipseEntity(sb As StringBuilder, el As ExportEllipse2D)

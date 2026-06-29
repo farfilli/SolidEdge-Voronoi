@@ -7,6 +7,8 @@ Public Enum ExportSegmentKind
     Arc
     CubicBezier
     Ellipse
+    Circle
+    EllipticalArc
 End Enum
 
 Public MustInherit Class ExportSegment2D
@@ -103,6 +105,55 @@ Public Class ExportEllipse2D
         Me.RadiusMajor = rMajor
         Me.RadiusMinor = rMinor
         Me.RotationRad = rotationRad
+        Me.Orientation = orientation
+    End Sub
+End Class
+
+' Cerchio completo in world-space.
+Public Class ExportCircle2D
+    Inherits ExportSegment2D
+
+    Public Property Center As Vec2
+    Public Property Radius As Double
+
+    Public Sub New()
+        Kind = ExportSegmentKind.Circle
+    End Sub
+
+    Public Sub New(center As Vec2, radius As Double)
+        Kind = ExportSegmentKind.Circle
+        Me.Center = center
+        Me.Radius = radius
+    End Sub
+End Class
+
+' Arco di ellisse in world-space. I due semiassi sono memorizzati come VETTORI
+' (modulo = semiasse), cosi' campionando P(t)=C+cos(t)*Major+sin(t)*Minor sia la
+' riflessione in Y sia l'orientazione si gestiscono da sole. StartAngle/SweepAngle
+' sono i valori parametrici originali di SE (radianti), conservati per il
+' round-trip nativo in export. Orientation = Geom2dOrientationConstants grezzo.
+Public Class ExportEllipticalArc2D
+    Inherits ExportSegment2D
+
+    Public Property Center As Vec2
+    Public Property MajorAxis As Vec2
+    Public Property MinorAxis As Vec2
+    Public Property StartAngle As Double
+    Public Property SweepAngle As Double
+    Public Property Orientation As Integer = 0
+
+    Public Sub New()
+        Kind = ExportSegmentKind.EllipticalArc
+    End Sub
+
+    Public Sub New(center As Vec2, major As Vec2, minor As Vec2,
+                   startAngle As Double, sweepAngle As Double, orientation As Integer)
+        Kind = ExportSegmentKind.EllipticalArc
+        Me.Center = center
+        Me.MajorAxis = major
+        Me.MinorAxis = minor
+        Me.StartAngle = startAngle
+        Me.SweepAngle = sweepAngle
         Me.Orientation = orientation
     End Sub
 End Class
@@ -436,6 +487,20 @@ Public Module ExportGeometry
                     el.RadiusMinor * r,
                     el.RotationRad + ang,
                     el.Orientation))
+
+            ElseIf TypeOf seg Is ExportCircle2D Then
+                Dim ci = DirectCast(seg, ExportCircle2D)
+                outp.Segments.Add(New ExportCircle2D(
+                    MapBlockPoint(ci.Center, anchor, baseNx, baseNy, r, cosA, sinA),
+                    ci.Radius * r))
+
+            ElseIf TypeOf seg Is ExportEllipticalArc2D Then
+                Dim ea = DirectCast(seg, ExportEllipticalArc2D)
+                outp.Segments.Add(New ExportEllipticalArc2D(
+                    MapBlockPoint(ea.Center, anchor, baseNx, baseNy, r, cosA, sinA),
+                    MapBlockVector(ea.MajorAxis, r, cosA, sinA),
+                    MapBlockVector(ea.MinorAxis, r, cosA, sinA),
+                    ea.StartAngle, ea.SweepAngle, ea.Orientation))
             End If
         Next
 
@@ -450,6 +515,14 @@ Public Module ExportGeometry
         Dim rx As Double = dx * cosA - dy * sinA
         Dim ry As Double = dx * sinA + dy * cosA
         Return New Vec2(anchor.X + rx * r, anchor.Y + ry * r)
+    End Function
+
+    ' Come MapBlockPoint ma per un VETTORE (direzione/asse): solo rotazione e
+    ' scala, niente traslazione ne' punto base.
+    Private Function MapBlockVector(v As Vec2, r As Double, cosA As Double, sinA As Double) As Vec2
+        Dim rx As Double = v.X * cosA - v.Y * sinA
+        Dim ry As Double = v.X * sinA + v.Y * cosA
+        Return New Vec2(rx * r, ry * r)
     End Function
 
     ' Normalizza in place una definizione di blocco attorno all'origine (~raggio 1),
@@ -470,6 +543,13 @@ Public Module ExportGeometry
                     AccumulateArcPoints(DirectCast(seg, ExportArc2D), pts)
                 ElseIf TypeOf seg Is ExportEllipse2D Then
                     AccumulateEllipsePoints(DirectCast(seg, ExportEllipse2D), pts)
+                ElseIf TypeOf seg Is ExportCircle2D Then
+                    Dim ci = DirectCast(seg, ExportCircle2D)
+                    pts.Add(New Vec2(ci.Center.X - ci.Radius, ci.Center.Y - ci.Radius))
+                    pts.Add(New Vec2(ci.Center.X + ci.Radius, ci.Center.Y + ci.Radius))
+                ElseIf TypeOf seg Is ExportEllipticalArc2D Then
+                    Dim ea = DirectCast(seg, ExportEllipticalArc2D)
+                    pts.AddRange(SampleEllipticalArc(ea.Center, ea.MajorAxis, ea.MinorAxis, ea.StartAngle, ea.SweepAngle, ea.Orientation))
                 End If
             Next
         Next
@@ -533,6 +613,16 @@ Public Module ExportGeometry
                                                el.RadiusMinor / maxR,
                                                el.RotationRad,
                                                el.Orientation))
+                ElseIf TypeOf seg Is ExportCircle2D Then
+                    Dim ci = DirectCast(seg, ExportCircle2D)
+                    ns.Add(New ExportCircle2D(NormBlockPoint(ci.Center, cx, cy, maxR), ci.Radius / maxR))
+                ElseIf TypeOf seg Is ExportEllipticalArc2D Then
+                    Dim ea = DirectCast(seg, ExportEllipticalArc2D)
+                    ns.Add(New ExportEllipticalArc2D(
+                        NormBlockPoint(ea.Center, cx, cy, maxR),
+                        New Vec2(ea.MajorAxis.X / maxR, ea.MajorAxis.Y / maxR),
+                        New Vec2(ea.MinorAxis.X / maxR, ea.MinorAxis.Y / maxR),
+                        ea.StartAngle, ea.SweepAngle, ea.Orientation))
                 End If
             Next
             e.Segments = ns
@@ -585,6 +675,29 @@ Public Module ExportGeometry
     Private Sub AccumulateEllipsePoints(el As ExportEllipse2D, pts As List(Of Vec2))
         pts.AddRange(SampleEllipse(el.Center, el.RadiusMajor, el.RadiusMinor, el.RotationRad, 16))
     End Sub
+
+    ' Campiona un arco di ellisse: P(t) = Center + cos(t)*Major + sin(t)*Minor.
+    ' SweepAngle e' una MAGNITUDINE; il verso e' dato da Orientation. Nel nostro
+    ' frame (Y ribaltato) il segno risulta invertito: orient=1 -> +sweep,
+    ' orient<>1 -> -sweep. Restituisce una polilinea aperta.
+    Public Function SampleEllipticalArc(center As Vec2,
+                                        major As Vec2,
+                                        minor As Vec2,
+                                        startAngle As Double,
+                                        sweepAngle As Double,
+                                        orientation As Integer) As List(Of Vec2)
+        Dim effSweep As Double = If(orientation = 1, sweepAngle, -sweepAngle)
+        Dim pts As New List(Of Vec2)
+        Dim steps As Integer = Math.Max(8, CInt(Math.Ceiling(64.0 * Math.Abs(effSweep) / (2.0 * Math.PI))))
+        For i As Integer = 0 To steps
+            Dim t As Double = startAngle + effSweep * (i / CDbl(steps))
+            Dim ct As Double = Math.Cos(t)
+            Dim st As Double = Math.Sin(t)
+            pts.Add(New Vec2(center.X + ct * major.X + st * minor.X,
+                             center.Y + ct * major.Y + st * minor.Y))
+        Next
+        Return pts
+    End Function
 
     Private Function DistTo(p As Vec2, cx As Double, cy As Double) As Double
         Dim dx = p.X - cx

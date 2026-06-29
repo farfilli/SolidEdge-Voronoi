@@ -337,6 +337,39 @@ Public Class VoronoiCanvas
                     path.AddLines(spts.ToArray())
                     added = True
                 End If
+
+            ElseIf TypeOf seg Is ExportCircle2D Then
+                Dim ci = DirectCast(seg, ExportCircle2D)
+                Dim cen = WorldToScreen(ci.Center, view)
+                Dim rPx As Single = CSng(ci.Radius * view.Scale)
+                If IsSanePt(cen) AndAlso rPx > 0.0F AndAlso (rPx * 2.0F) >= MinDrawLenPx Then
+                    path.AddEllipse(cen.X - rPx, cen.Y - rPx, rPx * 2.0F, rPx * 2.0F)
+                    added = True
+                End If
+
+            ElseIf TypeOf seg Is ExportEllipticalArc2D Then
+                Dim ea = DirectCast(seg, ExportEllipticalArc2D)
+                Dim wpts = ExportGeometry.SampleEllipticalArc(ea.Center, ea.MajorAxis, ea.MinorAxis, ea.StartAngle, ea.SweepAngle, ea.Orientation)
+                Dim spts As New List(Of PointF)
+                Dim ok As Boolean = True
+                Dim mnx As Single = Single.MaxValue, mny As Single = Single.MaxValue
+                Dim mxx As Single = Single.MinValue, mxy As Single = Single.MinValue
+                For Each wp2 In wpts
+                    Dim sp = WorldToScreen(wp2, view)
+                    If Not IsSanePt(sp) Then
+                        ok = False
+                        Exit For
+                    End If
+                    spts.Add(sp)
+                    If sp.X < mnx Then mnx = sp.X
+                    If sp.Y < mny Then mny = sp.Y
+                    If sp.X > mxx Then mxx = sp.X
+                    If sp.Y > mxy Then mxy = sp.Y
+                Next
+                If ok AndAlso spts.Count >= 2 AndAlso (mxx - mnx) + (mxy - mny) >= MinDrawLenPx Then
+                    path.AddLines(spts.ToArray())
+                    added = True
+                End If
             End If
         Next
 

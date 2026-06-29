@@ -160,6 +160,45 @@ Public Module SolidEdgeExporter
                 Next
             End If
 
+            Dim ellipticalArcs2d As Object = Nothing
+            Try
+                ellipticalArcs2d = profile.EllipticalArcs2d
+            Catch
+                ellipticalArcs2d = Nothing
+            End Try
+
+            If ellipticalArcs2d IsNot Nothing Then
+                For i As Integer = 1 To CInt(ellipticalArcs2d.Count)
+                    Dim ea = ellipticalArcs2d.Item(i)
+
+                    Dim xc As Double = 0.0, yc As Double = 0.0
+                    ea.GetCenterPoint(xc, yc)
+                    Dim xa As Double = 0.0, ya As Double = 0.0
+                    ea.GetMajorAxis(xa, ya)
+                    Dim xb As Double = 0.0, yb As Double = 0.0
+                    ea.GetMinorAxis(xb, yb)
+
+                    Dim startA As Double = CDbl(ea.StartAngle)
+                    Dim sweepA As Double = CDbl(ea.SweepAngle)
+                    Dim orient As Integer = 0
+                    Try
+                        orient = CInt(ea.Orientation)
+                    Catch
+                        orient = 0
+                    End Try
+
+                    Dim centerW As New Vec2(xc * 1000.0, -yc * 1000.0)
+                    Dim majW As New Vec2(xa * 1000.0, -ya * 1000.0)
+                    Dim minW As New Vec2(xb * 1000.0, -yb * 1000.0)
+
+                    ' Arco aperto: campionato come pezzo di contorno (come gli archi).
+                    Dim pts = ExportGeometry.SampleEllipticalArc(centerW, majW, minW, startA, sweepA, orient)
+                    If pts.Count >= 2 Then
+                        pieces.Add(New BoundaryPiece With {.Points = pts})
+                    End If
+                Next
+            End If
+
             If pieces.Count = 0 Then
                 errorMessage = "No readable geometry found in " & sourceLabel & "."
                 Return False
@@ -338,6 +377,7 @@ Public Module SolidEdgeExporter
         Dim arcs2d As Object = Nothing
         Dim circles2d As Object = Nothing
         Dim ellipses2d As Object = Nothing
+        Dim ellipticalArcs2d As Object = Nothing
 
         Try
             lines2d = profile.Lines2d
@@ -353,6 +393,10 @@ Public Module SolidEdgeExporter
         End Try
         Try
             ellipses2d = profile.Ellipses2d
+        Catch
+        End Try
+        Try
+            ellipticalArcs2d = profile.EllipticalArcs2d
         Catch
         End Try
 
@@ -404,16 +448,16 @@ Public Module SolidEdgeExporter
                 End Try
 
                 ' Angoli nel nostro frame (Y in basso, punti gia' ribaltati).
-                Dim _aS As Double = Math.Atan2(sp.Y - center.Y, sp.X - center.X) * 180.0 / Math.PI
+                Dim aaS As Double = Math.Atan2(sp.Y - center.Y, sp.X - center.X) * 180.0 / Math.PI
                 Dim aE As Double = Math.Atan2(ep.Y - center.Y, ep.X - center.X) * 180.0 / Math.PI
 
                 ' SE Orientation: 0 = CW, 1 = CCW (frame SE, Y in alto). Il flip Y
                 ' inverte il verso: SE-CW => verso positivo (orario) nel nostro frame.
                 Dim sweep As Double
                 If orientation = 0 Then
-                    sweep = NormPos360(aE - _aS)
+                    sweep = NormPos360(aE - aaS)
                 Else
-                    sweep = NormPos360(aE - _aS) - 360.0
+                    sweep = NormPos360(aE - aaS) - 360.0
                 End If
 
                 Dim arcSeg As New ExportArc2D(center, rad, sp, ep, orientation = 0)
@@ -436,13 +480,10 @@ Public Module SolidEdgeExporter
 
                 Dim rad As Double = CDbl(cir.Radius) * 1000.0
                 Dim center As New Vec2(xc * 1000.0, -yc * 1000.0)
-                Dim pR As New Vec2(center.X + rad, center.Y)
-                Dim pL As New Vec2(center.X - rad, center.Y)
 
                 Dim e As New ExportPath2D()
                 e.Closed = True
-                e.Segments.Add(New ExportArc2D(center, rad, pR, pL, False))
-                e.Segments.Add(New ExportArc2D(center, rad, pL, pR, False))
+                e.Segments.Add(New ExportCircle2D(center, rad))
                 entities.Add(e)
             Next
         End If
@@ -485,10 +526,45 @@ Public Module SolidEdgeExporter
             Next
         End If
 
+        If ellipticalArcs2d IsNot Nothing Then
+            For i As Integer = 1 To CInt(ellipticalArcs2d.Count)
+                Dim ea = ellipticalArcs2d.Item(i)
+
+                Dim xc As Double = 0.0, yc As Double = 0.0
+                ea.GetCenterPoint(xc, yc)
+                Dim xa As Double = 0.0, ya As Double = 0.0
+                ea.GetMajorAxis(xa, ya)
+                Dim xb As Double = 0.0, yb As Double = 0.0
+                ea.GetMinorAxis(xb, yb)
+
+                Dim startA As Double = CDbl(ea.StartAngle)
+                Dim sweepA As Double = CDbl(ea.SweepAngle)
+                Dim orient As Integer = 0
+                Try
+                    orient = CInt(ea.Orientation)
+                Catch
+                    orient = 0
+                End Try
+
+                Dim centerW As New Vec2(xc * 1000.0, -yc * 1000.0)
+                Dim majW As New Vec2(xa * 1000.0, -ya * 1000.0)
+                Dim minW As New Vec2(xb * 1000.0, -yb * 1000.0)
+
+                If majW.X * majW.X + majW.Y * majW.Y <= 0.0001 Then Continue For
+
+                ' Arco aperto: entita' nativa che conserva i valori SE originali.
+                Dim e As New ExportPath2D()
+                e.Closed = False
+                e.Segments.Add(New ExportEllipticalArc2D(centerW, majW, minW, startA, sweepA, orient))
+                entities.Add(e)
+            Next
+        End If
+
         lines2d = Nothing
         arcs2d = Nothing
         circles2d = Nothing
         ellipses2d = Nothing
+        ellipticalArcs2d = Nothing
 
         Return entities
     End Function
@@ -747,6 +823,8 @@ Public Module SolidEdgeExporter
         Dim arcs2d As Object = Nothing
         Dim bSplineCurves2d As Object = Nothing
         Dim ellipses2d As Object = Nothing
+        Dim circles2d As Object = Nothing
+        Dim ellipticalArcs2d As Object = Nothing
 
         Try
             app = Marshal.GetActiveObject("SolidEdge.Application")
@@ -764,9 +842,11 @@ Public Module SolidEdgeExporter
             arcs2d = profile.Arcs2d
             bSplineCurves2d = profile.BSplineCurves2d
             ellipses2d = profile.Ellipses2d
+            circles2d = profile.Circles2d
+            ellipticalArcs2d = profile.EllipticalArcs2d
 
             For Each path In paths
-                EmitPathGeometry(path, lines2d, arcs2d, bSplineCurves2d, ellipses2d)
+                EmitPathGeometry(path, lines2d, arcs2d, bSplineCurves2d, ellipses2d, circles2d, ellipticalArcs2d)
             Next
 
             app.ScreenUpdating = True
@@ -775,6 +855,8 @@ Public Module SolidEdgeExporter
             Throw New Exception("Error exporting to Solid Edge: " & ex.Message, ex)
 
         Finally
+            ellipticalArcs2d = Nothing
+            circles2d = Nothing
             ellipses2d = Nothing
             bSplineCurves2d = Nothing
             arcs2d = Nothing
@@ -795,6 +877,8 @@ Public Module SolidEdgeExporter
         Dim arcs2d As Object = Nothing
         Dim bSplineCurves2d As Object = Nothing
         Dim ellipses2d As Object = Nothing
+        Dim circles2d As Object = Nothing
+        Dim ellipticalArcs2d As Object = Nothing
         Dim blockOccurrences As Object = Nothing
 
         Try
@@ -813,6 +897,8 @@ Public Module SolidEdgeExporter
             arcs2d = profile.Arcs2d
             bSplineCurves2d = profile.BSplineCurves2d
             ellipses2d = profile.Ellipses2d
+            circles2d = profile.Circles2d
+            ellipticalArcs2d = profile.EllipticalArcs2d
 
             Try
                 blockOccurrences = profile.BlockOccurrences
@@ -832,7 +918,7 @@ Public Module SolidEdgeExporter
                         Rotation:=cg.BlockRotation)
                 Else
                     For Each path In cg.StyledPaths
-                        EmitPathGeometry(path, lines2d, arcs2d, bSplineCurves2d, ellipses2d)
+                        EmitPathGeometry(path, lines2d, arcs2d, bSplineCurves2d, ellipses2d, circles2d, ellipticalArcs2d)
                     Next
                 End If
             Next
@@ -844,6 +930,8 @@ Public Module SolidEdgeExporter
 
         Finally
             blockOccurrences = Nothing
+            ellipticalArcs2d = Nothing
+            circles2d = Nothing
             ellipses2d = Nothing
             bSplineCurves2d = Nothing
             arcs2d = Nothing
@@ -859,7 +947,9 @@ Public Module SolidEdgeExporter
                                  lines2d As Object,
                                  arcs2d As Object,
                                  bSplineCurves2d As Object,
-                                 ellipses2d As Object)
+                                 ellipses2d As Object,
+                                 circles2d As Object,
+                                 ellipticalArcs2d As Object)
         If path Is Nothing OrElse path.Segments Is Nothing Then Return
 
         For Each seg In path.Segments
@@ -961,6 +1051,39 @@ Public Module SolidEdgeExporter
                     majSEy,
                     ratio,
                     el.Orientation)
+
+            ElseIf TypeOf seg Is ExportCircle2D Then
+                Dim ci = DirectCast(seg, ExportCircle2D)
+                Dim cf = FlipX(ci.Center)
+                circles2d.AddByCenterRadius(
+                    cf.X / 1000.0,
+                    cf.Y / 1000.0,
+                    ci.Radius / 1000.0)
+
+            ElseIf TypeOf seg Is ExportEllipticalArc2D Then
+                Dim ea = DirectCast(seg, ExportEllipticalArc2D)
+                Dim cf = FlipX(ea.Center)
+                ' Vettore asse maggiore: solo riflessione in Y, poi in metri.
+                Dim mvf = FlipX(ea.MajorAxis)
+                Dim rMaj As Double = Math.Sqrt(ea.MajorAxis.X * ea.MajorAxis.X + ea.MajorAxis.Y * ea.MajorAxis.Y)
+                Dim rMin As Double = Math.Sqrt(ea.MinorAxis.X * ea.MinorAxis.X + ea.MinorAxis.Y * ea.MinorAxis.Y)
+                Dim ratio As Double = If(rMaj <> 0.0, rMin / rMaj, 1.0)
+
+                ' Stesso sweep effettivo usato nel campionamento: orient=1 -> +sweep,
+                ' altrimenti -sweep. Cosi' AddByCenter percorre l'arco dal lato corto
+                ' (con End=start+sweep "fisso" gli archi orient=0 uscivano dal lato
+                ' lungo, ~360-sweep, quasi ellissi intere).
+                Dim effSweep As Double = If(ea.Orientation = 1, ea.SweepAngle, -ea.SweepAngle)
+
+                ellipticalArcs2d.AddByCenter(
+                    cf.X / 1000.0,
+                    cf.Y / 1000.0,
+                    mvf.X / 1000.0,
+                    mvf.Y / 1000.0,
+                    ratio,
+                    ea.Orientation,
+                    ea.StartAngle,
+                    ea.StartAngle + effSweep)
             End If
         Next
     End Sub

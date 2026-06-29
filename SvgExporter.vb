@@ -226,6 +226,13 @@ Public Module SvgExporter
             ElseIf TypeOf seg Is ExportEllipse2D Then
                 Dim el = DirectCast(seg, ExportEllipse2D)
                 r.AddRange(ExportGeometry.SampleEllipse(el.Center, el.RadiusMajor, el.RadiusMinor, el.RotationRad, 16))
+            ElseIf TypeOf seg Is ExportCircle2D Then
+                Dim ci = DirectCast(seg, ExportCircle2D)
+                r.Add(New Vec2(ci.Center.X - ci.Radius, ci.Center.Y - ci.Radius))
+                r.Add(New Vec2(ci.Center.X + ci.Radius, ci.Center.Y + ci.Radius))
+            ElseIf TypeOf seg Is ExportEllipticalArc2D Then
+                Dim ea = DirectCast(seg, ExportEllipticalArc2D)
+                r.AddRange(ExportGeometry.SampleEllipticalArc(ea.Center, ea.MajorAxis, ea.MinorAxis, ea.StartAngle, ea.SweepAngle, ea.Orientation))
             End If
         Next
         Return r
@@ -289,6 +296,37 @@ Public Module SvgExporter
                 End If
                 sb.Append($"A {F(s.RadiusMajor)} {F(s.RadiusMinor)} {F(rotDeg)} 0 1 {F(p1x)} {F(p1y)} ")
                 sb.Append($"A {F(s.RadiusMajor)} {F(s.RadiusMinor)} {F(rotDeg)} 0 1 {F(p0x)} {F(p0y)} ")
+
+            ElseIf TypeOf seg Is ExportCircle2D Then
+                Dim s = DirectCast(seg, ExportCircle2D)
+                Dim p0x As Double = s.Center.X + s.Radius
+                Dim p0y As Double = s.Center.Y
+                Dim p1x As Double = s.Center.X - s.Radius
+                Dim p1y As Double = s.Center.Y
+                If firstMove Then
+                    sb.Append($"M {F(p0x)} {F(p0y)} ")
+                    firstMove = False
+                Else
+                    sb.Append($"L {F(p0x)} {F(p0y)} ")
+                End If
+                sb.Append($"A {F(s.Radius)} {F(s.Radius)} 0 0 1 {F(p1x)} {F(p1y)} ")
+                sb.Append($"A {F(s.Radius)} {F(s.Radius)} 0 0 1 {F(p0x)} {F(p0y)} ")
+
+            ElseIf TypeOf seg Is ExportEllipticalArc2D Then
+                Dim s = DirectCast(seg, ExportEllipticalArc2D)
+                Dim arcPts = ExportGeometry.SampleEllipticalArc(s.Center, s.MajorAxis, s.MinorAxis, s.StartAngle, s.SweepAngle, s.Orientation)
+                For k As Integer = 0 To arcPts.Count - 1
+                    If k = 0 Then
+                        If firstMove Then
+                            sb.Append($"M {F(arcPts(k).X)} {F(arcPts(k).Y)} ")
+                            firstMove = False
+                        Else
+                            sb.Append($"L {F(arcPts(k).X)} {F(arcPts(k).Y)} ")
+                        End If
+                    Else
+                        sb.Append($"L {F(arcPts(k).X)} {F(arcPts(k).Y)} ")
+                    End If
+                Next
             End If
         Next
 
