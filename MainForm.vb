@@ -68,7 +68,7 @@ Public Class MainForm
     End Class
 
     Public Sub New()
-        Text = "Solid Edge Voronoi Generator - v1.1"
+        Text = "Solid Edge Voronoi Generator - v1.2"
         StartPosition = FormStartPosition.CenterScreen
         Width = 1550
         Height = 920
