@@ -233,6 +233,9 @@ Public Module SvgExporter
             ElseIf TypeOf seg Is ExportEllipticalArc2D Then
                 Dim ea = DirectCast(seg, ExportEllipticalArc2D)
                 r.AddRange(ExportGeometry.SampleEllipticalArc(ea.Center, ea.MajorAxis, ea.MinorAxis, ea.StartAngle, ea.SweepAngle, ea.Orientation))
+            ElseIf TypeOf seg Is ExportBSpline2D Then
+                Dim bs = DirectCast(seg, ExportBSpline2D)
+                r.AddRange(bs.Nodes)
             End If
         Next
         Return r
@@ -325,6 +328,22 @@ Public Module SvgExporter
                         End If
                     Else
                         sb.Append($"L {F(arcPts(k).X)} {F(arcPts(k).Y)} ")
+                    End If
+                Next
+
+            ElseIf TypeOf seg Is ExportBSpline2D Then
+                Dim s = DirectCast(seg, ExportBSpline2D)
+                Dim curvePts = ExportGeometry.SampleBSpline(s.Nodes, s.ClosedCurve)
+                For k As Integer = 0 To curvePts.Count - 1
+                    If k = 0 Then
+                        If firstMove Then
+                            sb.Append($"M {F(curvePts(k).X)} {F(curvePts(k).Y)} ")
+                            firstMove = False
+                        Else
+                            sb.Append($"L {F(curvePts(k).X)} {F(curvePts(k).Y)} ")
+                        End If
+                    Else
+                        sb.Append($"L {F(curvePts(k).X)} {F(curvePts(k).Y)} ")
                     End If
                 Next
             End If

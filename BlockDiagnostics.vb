@@ -1,5 +1,5 @@
 ' ============================================================================
-'  DIAGNOSTICA TEMPORANEA BLOCCHI  (v2 - include ellissi/cerchi/archi ellittici)
+'  DIAGNOSTICA TEMPORANEA BLOCCHI  (v3 - include ellissi/cerchi/archi ellittici/B-spline)
 '
 '  USO (come prima):
 '  1) Incolla questo Module nel progetto (sostituendo l'eventuale versione v1).
@@ -51,7 +51,7 @@ Public Module BlockDiag
                                         d.NativeCenter.X, d.NativeCenter.Y, d.NativeRadius,
                                         d.BaseOrigin.X, d.BaseOrigin.Y))
 
-            Dim nLine = 0, nArc = 0, nBez = 0, nEll = 0, nCir = 0, nEArc = 0
+            Dim nLine = 0, nArc = 0, nBez = 0, nEll = 0, nCir = 0, nEArc = 0, nBspl = 0
 
             If d.Entities IsNot Nothing Then
                 For Each e In d.Entities
@@ -94,13 +94,24 @@ Public Module BlockDiag
                             sb.AppendLine(String.Format("             start={0:0.####} rad ({1:0.##} deg)   sweep={2:0.####} rad ({3:0.##} deg)",
                                 ea.StartAngle, ea.StartAngle * 180.0 / Math.PI,
                                 ea.SweepAngle, ea.SweepAngle * 180.0 / Math.PI))
+
+                        ElseIf TypeOf seg Is ExportBSpline2D Then
+                            nBspl += 1
+                            Dim bs = DirectCast(seg, ExportBSpline2D)
+                            Dim cnt = If(bs.Nodes Is Nothing, 0, bs.Nodes.Count)
+                            sb.AppendLine(String.Format("    BSPLINE  nodi={0}  closed(tang)={1}", cnt, bs.ClosedCurve))
+                            If bs.Nodes IsNot Nothing Then
+                                For k As Integer = 0 To bs.Nodes.Count - 1
+                                    sb.AppendLine(String.Format("             node[{0}]=({1:0.####},{2:0.####})", k, bs.Nodes(k).X, bs.Nodes(k).Y))
+                                Next
+                            End If
                         End If
                     Next
                 Next
             End If
 
-            sb.AppendLine(String.Format("    => linee={0} archi={1} bezier={2} ellissi={3} cerchi={4} archiEllittici={5}",
-                                        nLine, nArc, nBez, nEll, nCir, nEArc))
+            sb.AppendLine(String.Format("    => linee={0} archi={1} bezier={2} ellissi={3} cerchi={4} archiEllittici={5} bspline={6}",
+                                        nLine, nArc, nBez, nEll, nCir, nEArc, nBspl))
         Next
 
         Return sb.ToString()

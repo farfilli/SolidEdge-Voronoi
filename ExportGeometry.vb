@@ -9,6 +9,7 @@ Public Enum ExportSegmentKind
     Ellipse
     Circle
     EllipticalArc
+    BSpline
 End Enum
 
 Public MustInherit Class ExportSegment2D
@@ -155,6 +156,28 @@ Public Class ExportEllipticalArc2D
         Me.StartAngle = startAngle
         Me.SweepAngle = sweepAngle
         Me.Orientation = orientation
+    End Sub
+End Class
+
+' Curva B-spline in world-space. Memorizziamo i NODI (punti di interpolazione
+' attraverso cui passa la curva, come restituiti da GetNode) e il flag di
+' chiusura tangenziale. In anteprima/SVG/DXF la curva viene approssimata con una
+' spline di Catmull-Rom che passa per i nodi; in export verso SE si ri-emettono i
+' nodi nativi (AddByPointsWithCloseOption), che ricostruisce la curva esatta.
+Public Class ExportBSpline2D
+    Inherits ExportSegment2D
+
+    Public Property Nodes As New List(Of Vec2)
+    Public Property ClosedCurve As Boolean = False
+
+    Public Sub New()
+        Kind = ExportSegmentKind.BSpline
+    End Sub
+
+    Public Sub New(nodes As List(Of Vec2), closedCurve As Boolean)
+        Kind = ExportSegmentKind.BSpline
+        Me.Nodes = nodes
+        Me.ClosedCurve = closedCurve
     End Sub
 End Class
 
@@ -501,6 +524,14 @@ Public Module ExportGeometry
                     MapBlockVector(ea.MajorAxis, r, cosA, sinA),
                     MapBlockVector(ea.MinorAxis, r, cosA, sinA),
                     ea.StartAngle, ea.SweepAngle, ea.Orientation))
+
+            ElseIf TypeOf seg Is ExportBSpline2D Then
+                Dim bs = DirectCast(seg, ExportBSpline2D)
+                Dim mapped As New List(Of Vec2)
+                For Each nd In bs.Nodes
+                    mapped.Add(MapBlockPoint(nd, anchor, baseNx, baseNy, r, cosA, sinA))
+                Next
+                outp.Segments.Add(New ExportBSpline2D(mapped, bs.ClosedCurve))
             End If
         Next
 
@@ -550,6 +581,9 @@ Public Module ExportGeometry
                 ElseIf TypeOf seg Is ExportEllipticalArc2D Then
                     Dim ea = DirectCast(seg, ExportEllipticalArc2D)
                     pts.AddRange(SampleEllipticalArc(ea.Center, ea.MajorAxis, ea.MinorAxis, ea.StartAngle, ea.SweepAngle, ea.Orientation))
+                ElseIf TypeOf seg Is ExportBSpline2D Then
+                    Dim bs = DirectCast(seg, ExportBSpline2D)
+                    pts.AddRange(bs.Nodes)
                 End If
             Next
         Next
@@ -623,6 +657,13 @@ Public Module ExportGeometry
                         New Vec2(ea.MajorAxis.X / maxR, ea.MajorAxis.Y / maxR),
                         New Vec2(ea.MinorAxis.X / maxR, ea.MinorAxis.Y / maxR),
                         ea.StartAngle, ea.SweepAngle, ea.Orientation))
+                ElseIf TypeOf seg Is ExportBSpline2D Then
+                    Dim bs = DirectCast(seg, ExportBSpline2D)
+                    Dim nn As New List(Of Vec2)
+                    For Each nd In bs.Nodes
+                        nn.Add(NormBlockPoint(nd, cx, cy, maxR))
+                    Next
+                    ns.Add(New ExportBSpline2D(nn, bs.ClosedCurve))
                 End If
             Next
             e.Segments = ns
@@ -697,6 +738,217 @@ Public Module ExportGeometry
                              center.Y + ct * major.Y + st * minor.Y))
         Next
         Return pts
+    End Function
+
+    ' Campiona una B-spline interpolante con una SPLINE CUBICA C2 GLOBALE che passa
+    ' per i nodi: condizioni NATURALI per le curve aperte, PERIODICHE per quelle
+    ' chiuse. Parametrizzazione a lunghezza di corda. Cosi' la forma (tangenti e
+    ' curvatura fra i nodi) aderisce alla B-spline di Solid Edge, senza i "gomiti"
+    ' della precedente interpolazione locale. Polilinea fitta; per le chiuse il
+    ' punto finale NON duplica l'iniziale (chiusura gestita dal flag Closed).
+    Public Function SampleBSpline(nodes As List(Of Vec2), closedCurve As Boolean) As List(Of Vec2)
+        Dim outPts As New List(Of Vec2)
+        If nodes Is Nothing OrElse nodes.Count = 0 Then Return outPts
+
+        ' SE chiude la curva ripetendo il primo punto come ultimo nodo; inoltre
+        ' possono esserci nodi coincidenti. Rimuovendoli si evita un segmento di
+        ' lunghezza nulla che, nella spline, produrrebbe una "frustata" vicino alla
+        ' giunzione (derivate seconde divergenti). RemoveDuplicateSequentialPoints
+        ' toglie anche il punto di chiusura ripetuto (first == last).
+        Dim bb = Geo2D.GetBounds(nodes)
+        Dim diag As Double = Math.Sqrt(bb.Width * bb.Width + bb.Height * bb.Height)
+        Dim eps As Double = Math.Max(diag * 0.000001, 0.000000001)
+        Dim cleanNodes = Geo2D.RemoveDuplicateSequentialPoints(nodes, eps)
+
+        If cleanNodes.Count = 0 Then Return outPts
+        If cleanNodes.Count = 1 Then
+            outPts.Add(cleanNodes(0))
+            Return outPts
+        End If
+        If cleanNodes.Count = 2 Then
+            outPts.Add(cleanNodes(0))
+            outPts.Add(cleanNodes(1))
+            Return outPts
+        End If
+
+        Dim n As Integer = cleanNodes.Count
+        Dim segPerSpan As Integer = 18
+        Const epsLen As Double = 0.000001
+
+        Dim vx(n - 1) As Double
+        Dim vy(n - 1) As Double
+        For i As Integer = 0 To n - 1
+            vx(i) = cleanNodes(i).X
+            vy(i) = cleanNodes(i).Y
+        Next
+
+        If closedCurve Then
+            ' lunghezze dei segmenti i -> (i+1) mod n
+            Dim h(n - 1) As Double
+            For i As Integer = 0 To n - 1
+                h(i) = Math.Max(Geo2D.Distance(cleanNodes(i), cleanNodes((i + 1) Mod n)), epsLen)
+            Next
+
+            Dim mx = PeriodicSplineM(h, vx)
+            Dim my = PeriodicSplineM(h, vy)
+
+            For i As Integer = 0 To n - 1
+                Dim ni As Integer = (i + 1) Mod n
+                For s As Integer = 0 To segPerSpan - 1
+                    Dim tq As Double = h(i) * (s / CDbl(segPerSpan))
+                    Dim x = EvalCubicScalar(tq, 0.0, h(i), vx(i), vx(ni), mx(i), mx(ni))
+                    Dim y = EvalCubicScalar(tq, 0.0, h(i), vy(i), vy(ni), my(i), my(ni))
+                    outPts.Add(New Vec2(x, y))
+                Next
+            Next
+        Else
+            ' lunghezze dei segmenti i -> i+1 (n-1 segmenti)
+            Dim h(n - 2) As Double
+            For i As Integer = 0 To n - 2
+                h(i) = Math.Max(Geo2D.Distance(cleanNodes(i), cleanNodes(i + 1)), epsLen)
+            Next
+
+            Dim mx = NaturalSplineM(h, vx)
+            Dim my = NaturalSplineM(h, vy)
+
+            For i As Integer = 0 To n - 2
+                For s As Integer = 0 To segPerSpan - 1
+                    Dim tq As Double = h(i) * (s / CDbl(segPerSpan))
+                    Dim x = EvalCubicScalar(tq, 0.0, h(i), vx(i), vx(i + 1), mx(i), mx(i + 1))
+                    Dim y = EvalCubicScalar(tq, 0.0, h(i), vy(i), vy(i + 1), my(i), my(i + 1))
+                    outPts.Add(New Vec2(x, y))
+                Next
+            Next
+            outPts.Add(cleanNodes(n - 1))
+        End If
+
+        Return outPts
+    End Function
+
+    ' Valore di un tratto di spline cubica su [ta,tb] con derivate seconde Ma,Mb.
+    Private Function EvalCubicScalar(tq As Double, ta As Double, tb As Double,
+                                     va As Double, vb As Double,
+                                     ma As Double, mb As Double) As Double
+        Dim h As Double = tb - ta
+        If h <= 0.0000001 Then Return va
+        Dim A As Double = (tb - tq) / h
+        Dim B As Double = (tq - ta) / h
+        Return A * va + B * vb + ((A * A * A - A) * ma + (B * B * B - B) * mb) * (h * h) / 6.0
+    End Function
+
+    ' Derivate seconde per spline cubica NATURALE (M0 = M(n-1) = 0).
+    ' h(0..n-2) = lunghezze segmenti; v(0..n-1) = valori nodali.
+    Private Function NaturalSplineM(h As Double(), v As Double()) As Double()
+        Dim n As Integer = v.Length
+        Dim m(n - 1) As Double
+        If n < 3 Then Return m
+
+        Dim a(n - 1) As Double
+        Dim b(n - 1) As Double
+        Dim c(n - 1) As Double
+        Dim d(n - 1) As Double
+
+        b(0) = 1.0 : c(0) = 0.0 : d(0) = 0.0
+        a(n - 1) = 0.0 : b(n - 1) = 1.0 : d(n - 1) = 0.0
+
+        For i As Integer = 1 To n - 2
+            a(i) = h(i - 1)
+            c(i) = h(i)
+            b(i) = 2.0 * (h(i - 1) + h(i))
+            d(i) = 6.0 * ((v(i + 1) - v(i)) / h(i) - (v(i) - v(i - 1)) / h(i - 1))
+        Next
+
+        Return SolveThomas(a, b, c, d)
+    End Function
+
+    ' Derivate seconde per spline cubica PERIODICA (M(n) = M(0)).
+    ' h(0..n-1) = lunghezze segmenti i->(i+1)mod n; v(0..n-1) = valori nodali.
+    Private Function PeriodicSplineM(h As Double(), v As Double()) As Double()
+        Dim n As Integer = v.Length
+        Dim m(n - 1) As Double
+        If n < 3 Then Return m
+
+        Dim a(n - 1) As Double
+        Dim b(n - 1) As Double
+        Dim c(n - 1) As Double
+        Dim d(n - 1) As Double
+
+        For i As Integer = 0 To n - 1
+            Dim hm As Double = h((i - 1 + n) Mod n)
+            Dim hi As Double = h(i)
+            a(i) = hm
+            c(i) = hi
+            b(i) = 2.0 * (hm + hi)
+            Dim vp As Double = v((i + 1) Mod n)
+            Dim vmm As Double = v((i - 1 + n) Mod n)
+            d(i) = 6.0 * ((vp - v(i)) / hi - (v(i) - vmm) / hm)
+        Next
+
+        ' corner: alpha (riga0,col n-1) = h(n-1); beta (riga n-1,col0) = h(n-1)
+        Dim alpha As Double = h(n - 1)
+        Dim beta As Double = h(n - 1)
+        a(0) = 0.0
+        c(n - 1) = 0.0
+
+        Return SolveCyclic(a, b, c, d, alpha, beta)
+    End Function
+
+    ' Risolutore tridiagonale (Thomas). a=sub, b=diag, c=super, d=termine noto.
+    Private Function SolveThomas(a As Double(), b As Double(), c As Double(), d As Double()) As Double()
+        Dim n As Integer = b.Length
+        Dim cp(n - 1) As Double
+        Dim dp(n - 1) As Double
+        Dim x(n - 1) As Double
+
+        cp(0) = c(0) / b(0)
+        dp(0) = d(0) / b(0)
+        For i As Integer = 1 To n - 1
+            Dim mden As Double = b(i) - a(i) * cp(i - 1)
+            If Math.Abs(mden) < 0.0000000001 Then mden = 0.0000000001
+            cp(i) = c(i) / mden
+            dp(i) = (d(i) - a(i) * dp(i - 1)) / mden
+        Next
+
+        x(n - 1) = dp(n - 1)
+        For i As Integer = n - 2 To 0 Step -1
+            x(i) = dp(i) - cp(i) * x(i + 1)
+        Next
+        Return x
+    End Function
+
+    ' Risolutore tridiagonale CICLICO (Sherman-Morrison). alpha = angolo alto-dx
+    ' (riga0,col n-1), beta = angolo basso-sx (riga n-1,col0).
+    Private Function SolveCyclic(a As Double(), b As Double(), c As Double(), d As Double(),
+                                 alpha As Double, beta As Double) As Double()
+        Dim n As Integer = b.Length
+        Dim m(n - 1) As Double
+        If n < 2 Then Return SolveThomas(a, b, c, d)
+
+        Dim gamma As Double = -b(0)
+        If Math.Abs(gamma) < 0.0000000001 Then gamma = -0.0000000001
+
+        Dim bb(n - 1) As Double
+        For i As Integer = 0 To n - 1
+            bb(i) = b(i)
+        Next
+        bb(0) = b(0) - gamma
+        bb(n - 1) = b(n - 1) - alpha * beta / gamma
+
+        Dim x = SolveThomas(a, bb, c, d)
+
+        Dim u(n - 1) As Double
+        u(0) = gamma
+        u(n - 1) = alpha
+        Dim z = SolveThomas(a, bb, c, u)
+
+        Dim denom As Double = 1.0 + z(0) + beta * z(n - 1) / gamma
+        If Math.Abs(denom) < 0.0000000001 Then denom = 0.0000000001
+        Dim fact As Double = (x(0) + beta * x(n - 1) / gamma) / denom
+
+        For i As Integer = 0 To n - 1
+            m(i) = x(i) - fact * z(i)
+        Next
+        Return m
     End Function
 
     Private Function DistTo(p As Vec2, cx As Double, cy As Double) As Double

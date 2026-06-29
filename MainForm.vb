@@ -981,11 +981,11 @@ Public Class MainForm
             For Each d In defs
                 ExportGeometry.NormalizeBlockInPlace(d)
             Next
-            diag &= Environment.NewLine & BlockDiag.DescribeBlocks(defs, "NORMALIZED")
-            Dim diagPath = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "block_diag.txt")
-            System.IO.File.WriteAllText(diagPath, diag)
-            MessageBox.Show("Diagnostica scritta in: " & diagPath)
+            'diag &= Environment.NewLine & BlockDiag.DescribeBlocks(defs, "NORMALIZED")
+            'Dim diagPath = System.IO.Path.Combine(
+            '    Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "block_diag.txt")
+            'System.IO.File.WriteAllText(diagPath, diag)
+            'MessageBox.Show("Diagnostica scritta in: " & diagPath)
 
             currentBlockSymbols = defs
             canvas.BlockSymbols = defs

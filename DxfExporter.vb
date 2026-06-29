@@ -35,6 +35,8 @@ Public Module DxfExporter
                     WriteCircleEntity(sb, DirectCast(seg, ExportCircle2D))
                 ElseIf TypeOf seg Is ExportEllipticalArc2D Then
                     WriteEllipticalArcEntity(sb, DirectCast(seg, ExportEllipticalArc2D))
+                ElseIf TypeOf seg Is ExportBSpline2D Then
+                    WriteBSplineSampledEntity(sb, DirectCast(seg, ExportBSpline2D))
                 End If
             Next
         Next
@@ -54,6 +56,18 @@ Public Module DxfExporter
         For i As Integer = 0 To pts.Count - 2
             WriteLineEntity(sb, New ExportLine2D(pts(i), pts(i + 1)))
         Next
+    End Sub
+
+    Private Sub WriteBSplineSampledEntity(sb As StringBuilder, bs As ExportBSpline2D)
+        ' B-spline approssimata (Catmull-Rom sui nodi) e scritta come segmenti LINE.
+        Dim pts = ExportGeometry.SampleBSpline(bs.Nodes, bs.ClosedCurve)
+        If pts Is Nothing OrElse pts.Count < 2 Then Exit Sub
+        For i As Integer = 0 To pts.Count - 2
+            WriteLineEntity(sb, New ExportLine2D(pts(i), pts(i + 1)))
+        Next
+        If bs.ClosedCurve AndAlso pts.Count >= 3 Then
+            WriteLineEntity(sb, New ExportLine2D(pts(pts.Count - 1), pts(0)))
+        End If
     End Sub
 
     Private Sub WriteCircleEntity(sb As StringBuilder, ci As ExportCircle2D)

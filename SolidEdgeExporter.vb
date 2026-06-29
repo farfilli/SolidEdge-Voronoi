@@ -199,6 +199,54 @@ Public Module SolidEdgeExporter
                 Next
             End If
 
+            Dim bsplines2d As Object = Nothing
+            Try
+                bsplines2d = profile.BSplineCurves2d
+            Catch
+                bsplines2d = Nothing
+            End Try
+
+            If bsplines2d IsNot Nothing Then
+                For i As Integer = 1 To CInt(bsplines2d.Count)
+                    Dim bc = bsplines2d.Item(i)
+
+                    Dim closed As Boolean = False
+                    Try
+                        closed = CBool(bc.IsTangentiallyClosedCurve)
+                    Catch
+                        closed = False
+                    End Try
+
+                    Dim nc As Integer = 0
+                    Try
+                        nc = CInt(bc.NodeCount)
+                    Catch
+                        nc = 0
+                    End Try
+
+                    Dim nodes As New List(Of Vec2)
+                    For k As Integer = 1 To nc
+                        Dim x As Double = 0.0, y As Double = 0.0
+                        Try
+                            bc.GetNode(k, x, y)
+                        Catch
+                            Exit For
+                        End Try
+                        nodes.Add(New Vec2(x * 1000.0, -y * 1000.0))
+                    Next
+
+                    If nodes.Count >= 2 Then
+                        Dim pts = ExportGeometry.SampleBSpline(nodes, closed)
+                        If closed AndAlso pts.Count >= 3 Then
+                            pts.Add(pts(0))   ' chiude l'anello per la ricostruzione del dominio
+                        End If
+                        If pts.Count >= 2 Then
+                            pieces.Add(New BoundaryPiece With {.Points = pts})
+                        End If
+                    End If
+                Next
+            End If
+
             If pieces.Count = 0 Then
                 errorMessage = "No readable geometry found in " & sourceLabel & "."
                 Return False
@@ -378,6 +426,7 @@ Public Module SolidEdgeExporter
         Dim circles2d As Object = Nothing
         Dim ellipses2d As Object = Nothing
         Dim ellipticalArcs2d As Object = Nothing
+        Dim bsplines2d As Object = Nothing
 
         Try
             lines2d = profile.Lines2d
@@ -397,6 +446,10 @@ Public Module SolidEdgeExporter
         End Try
         Try
             ellipticalArcs2d = profile.EllipticalArcs2d
+        Catch
+        End Try
+        Try
+            bsplines2d = profile.BSplineCurves2d
         Catch
         End Try
 
@@ -560,11 +613,52 @@ Public Module SolidEdgeExporter
             Next
         End If
 
+        If bsplines2d IsNot Nothing Then
+            For i As Integer = 1 To CInt(bsplines2d.Count)
+                Dim bc = bsplines2d.Item(i)
+
+                Dim closed As Boolean = False
+                Try
+                    closed = CBool(bc.IsTangentiallyClosedCurve)
+                Catch
+                    closed = False
+                End Try
+
+                Dim nc As Integer = 0
+                Try
+                    nc = CInt(bc.NodeCount)
+                Catch
+                    nc = 0
+                End Try
+
+                Dim nodes As New List(Of Vec2)
+                ' ASSUNZIONE: GetNode usa indici 1-based (come le collection SE).
+                ' Se i nodi risultassero shiftati/mancanti, provare 0..nc-1.
+                For k As Integer = 1 To nc
+                    Dim x As Double = 0.0, y As Double = 0.0
+                    Try
+                        bc.GetNode(k, x, y)
+                    Catch
+                        Exit For
+                    End Try
+                    nodes.Add(New Vec2(x * 1000.0, -y * 1000.0))
+                Next
+
+                If nodes.Count >= 2 Then
+                    Dim e As New ExportPath2D()
+                    e.Closed = closed
+                    e.Segments.Add(New ExportBSpline2D(nodes, closed))
+                    entities.Add(e)
+                End If
+            Next
+        End If
+
         lines2d = Nothing
         arcs2d = Nothing
         circles2d = Nothing
         ellipses2d = Nothing
         ellipticalArcs2d = Nothing
+        bsplines2d = Nothing
 
         Return entities
     End Function
@@ -1084,6 +1178,26 @@ Public Module SolidEdgeExporter
                     ea.Orientation,
                     ea.StartAngle,
                     ea.StartAngle + effSweep)
+
+            ElseIf TypeOf seg Is ExportBSpline2D Then
+                Dim bs = DirectCast(seg, ExportBSpline2D)
+                Dim cnt As Integer = bs.Nodes.Count
+                If cnt >= 2 Then
+                    ' Punti di interpolazione: ribaltati in Y e in metri, x,y interleaved.
+                    Dim arr(cnt * 2 - 1) As Double
+                    For k As Integer = 0 To cnt - 1
+                        Dim pf = FlipX(bs.Nodes(k))
+                        arr(k * 2) = pf.X / 1000.0
+                        arr(k * 2 + 1) = pf.Y / 1000.0
+                    Next
+
+                    ' ArraySize = numero di PUNTI (cnt). L'array contiene cnt*2 double
+                    ' (x,y interleaved). Passando cnt*2 SE leggeva il doppio degli
+                    ' elementi -> DISP_E_BADINDEX (indice non valido).
+                    ' Order = 3 come l'uso esistente di .Add in questo file; se la
+                    ' curva risultasse troppo "spigolosa", provare 4.
+                    bSplineCurves2d.AddByPointsWithCloseOption(3, cnt, arr, bs.ClosedCurve)
+                End If
             End If
         Next
     End Sub

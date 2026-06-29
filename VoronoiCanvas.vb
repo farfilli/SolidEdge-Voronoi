@@ -370,13 +370,35 @@ Public Class VoronoiCanvas
                     path.AddLines(spts.ToArray())
                     added = True
                 End If
+
+            ElseIf TypeOf seg Is ExportBSpline2D Then
+                Dim bs = DirectCast(seg, ExportBSpline2D)
+                Dim wpts = ExportGeometry.SampleBSpline(bs.Nodes, bs.ClosedCurve)
+                Dim spts As New List(Of PointF)
+                Dim ok As Boolean = True
+                Dim mnx As Single = Single.MaxValue, mny As Single = Single.MaxValue
+                Dim mxx As Single = Single.MinValue, mxy As Single = Single.MinValue
+                For Each wp2 In wpts
+                    Dim sp = WorldToScreen(wp2, view)
+                    If Not IsSanePt(sp) Then
+                        ok = False
+                        Exit For
+                    End If
+                    spts.Add(sp)
+                    If sp.X < mnx Then mnx = sp.X
+                    If sp.Y < mny Then mny = sp.Y
+                    If sp.X > mxx Then mxx = sp.X
+                    If sp.Y > mxy Then mxy = sp.Y
+                Next
+                If ok AndAlso spts.Count >= 2 AndAlso (mxx - mnx) + (mxy - mny) >= MinDrawLenPx Then
+                    path.AddLines(spts.ToArray())
+                    If bs.ClosedCurve AndAlso spts.Count >= 3 Then
+                        path.AddLine(spts(spts.Count - 1), spts(0))
+                    End If
+                    added = True
+                End If
             End If
         Next
-
-        If Not added Then
-            path.Dispose()
-            Return Nothing
-        End If
 
         If wp.Closed Then path.CloseFigure()
         Return path
