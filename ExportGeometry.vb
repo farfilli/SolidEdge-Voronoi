@@ -1,6 +1,9 @@
 ﻿Imports System
 Imports System.Collections.Generic
 Imports System.Drawing
+Imports System.Globalization
+Imports System.IO
+Imports System.Text
 
 Public Enum ExportSegmentKind
     Line
@@ -1610,6 +1613,220 @@ Public Module ExportGeometry
         Dim x = u * u * u * p0.X + 3.0 * u * u * t * c1.X + 3.0 * u * t * t * c2.X + t * t * t * p3.X
         Dim y = u * u * u * p0.Y + 3.0 * u * u * t * c1.Y + 3.0 * u * t * t * c2.Y + t * t * t * p3.Y
         Return New Vec2(x, y)
+    End Function
+
+    ' ============================================================
+    '  Libreria blocchi su file (formato testo proprietario, nessuna dipendenza)
+    '  I blocchi salvati sono nella forma gia' normalizzata; al caricamento NON
+    '  vanno rinormalizzati.
+    ' ============================================================
+
+    Private Const BLOCKS_HEADER As String = "SEVORONOI-BLOCKS 1"
+
+    Public Sub SaveBlocksToFile(filePath As String, blocks As List(Of BlockDefinition))
+        Dim sb As New StringBuilder()
+        sb.AppendLine(BLOCKS_HEADER)
+
+        If blocks IsNot Nothing Then
+            For Each b In blocks
+                If b Is Nothing Then Continue For
+                sb.AppendLine("BLOCK")
+                sb.AppendLine("NAME " & If(b.Name, ""))
+                sb.AppendLine("ORIGIN " & Fmt(b.BaseOrigin.X) & " " & Fmt(b.BaseOrigin.Y))
+                sb.AppendLine("NCENTER " & Fmt(b.NativeCenter.X) & " " & Fmt(b.NativeCenter.Y))
+                sb.AppendLine("NRADIUS " & Fmt(b.NativeRadius))
+
+                If b.Entities IsNot Nothing Then
+                    For Each pth In b.Entities
+                        If pth Is Nothing Then Continue For
+                        sb.AppendLine("PATH " & If(pth.Closed, "1", "0"))
+                        If pth.Segments IsNot Nothing Then
+                            For Each seg In pth.Segments
+                                WriteSegLine(sb, seg)
+                            Next
+                        End If
+                    Next
+                End If
+
+                sb.AppendLine("ENDBLOCK")
+            Next
+        End If
+
+        File.WriteAllText(filePath, sb.ToString(), Encoding.UTF8)
+    End Sub
+
+    Public Function LoadBlocksFromFile(filePath As String) As List(Of BlockDefinition)
+        Dim result As New List(Of BlockDefinition)
+        Dim lines = File.ReadAllLines(filePath)
+
+        Dim cur As BlockDefinition = Nothing
+        Dim curPath As ExportPath2D = Nothing
+
+        For Each raw In lines
+            Dim line = raw.Trim()
+            If line.Length = 0 Then Continue For
+
+            Dim sp As Integer = line.IndexOf(" "c)
+            Dim key As String = If(sp < 0, line, line.Substring(0, sp))
+            Dim rest As String = If(sp < 0, "", line.Substring(sp + 1))
+
+            Select Case key
+                Case "SEVORONOI-BLOCKS"
+                    ' intestazione/versione: ignorata
+                Case "BLOCK"
+                    cur = New BlockDefinition()
+                    curPath = Nothing
+                    result.Add(cur)
+                Case "NAME"
+                    If cur IsNot Nothing Then cur.Name = rest
+                Case "ORIGIN"
+                    If cur IsNot Nothing Then cur.BaseOrigin = ParseVec(rest)
+                Case "NCENTER"
+                    If cur IsNot Nothing Then cur.NativeCenter = ParseVec(rest)
+                Case "NRADIUS"
+                    If cur IsNot Nothing Then cur.NativeRadius = ParseD(rest)
+                Case "PATH"
+                    If cur IsNot Nothing Then
+                        curPath = New ExportPath2D()
+                        curPath.Closed = (rest.Trim() = "1")
+                        cur.Entities.Add(curPath)
+                    End If
+                Case "ENDBLOCK"
+                    cur = Nothing
+                    curPath = Nothing
+                Case "L", "A", "B", "E", "C", "EA", "S"
+                    If curPath IsNot Nothing Then
+                        Dim seg = ParseSegLine(key, rest)
+                        If seg IsNot Nothing Then curPath.Segments.Add(seg)
+                    End If
+            End Select
+        Next
+
+        ' Scarta blocchi senza geometria.
+        Dim cleaned As New List(Of BlockDefinition)
+        For Each b In result
+            If b.Entities IsNot Nothing AndAlso b.Entities.Count > 0 Then cleaned.Add(b)
+        Next
+        Return cleaned
+    End Function
+
+    Private Sub WriteSegLine(sb As StringBuilder, seg As ExportSegment2D)
+        If TypeOf seg Is ExportLine2D Then
+            Dim s = DirectCast(seg, ExportLine2D)
+            sb.AppendLine("L " & Fmt(s.P1.X) & " " & Fmt(s.P1.Y) & " " & Fmt(s.P2.X) & " " & Fmt(s.P2.Y))
+
+        ElseIf TypeOf seg Is ExportArc2D Then
+            Dim s = DirectCast(seg, ExportArc2D)
+            sb.AppendLine("A " & Fmt(s.Center.X) & " " & Fmt(s.Center.Y) & " " & Fmt(s.Radius) &
+                          " " & Fmt(s.StartPoint.X) & " " & Fmt(s.StartPoint.Y) &
+                          " " & Fmt(s.EndPoint.X) & " " & Fmt(s.EndPoint.Y) &
+                          " " & If(s.Clockwise, "1", "0") & " " & Fmt(s.SweepDeg))
+
+        ElseIf TypeOf seg Is ExportCubicBezier2D Then
+            Dim s = DirectCast(seg, ExportCubicBezier2D)
+            sb.AppendLine("B " & Fmt(s.P0.X) & " " & Fmt(s.P0.Y) & " " & Fmt(s.C1.X) & " " & Fmt(s.C1.Y) &
+                          " " & Fmt(s.C2.X) & " " & Fmt(s.C2.Y) & " " & Fmt(s.P3.X) & " " & Fmt(s.P3.Y))
+
+        ElseIf TypeOf seg Is ExportEllipse2D Then
+            Dim s = DirectCast(seg, ExportEllipse2D)
+            sb.AppendLine("E " & Fmt(s.Center.X) & " " & Fmt(s.Center.Y) & " " & Fmt(s.RadiusMajor) &
+                          " " & Fmt(s.RadiusMinor) & " " & Fmt(s.RotationRad) & " " & s.Orientation.ToString(CultureInfo.InvariantCulture))
+
+        ElseIf TypeOf seg Is ExportCircle2D Then
+            Dim s = DirectCast(seg, ExportCircle2D)
+            sb.AppendLine("C " & Fmt(s.Center.X) & " " & Fmt(s.Center.Y) & " " & Fmt(s.Radius))
+
+        ElseIf TypeOf seg Is ExportEllipticalArc2D Then
+            Dim s = DirectCast(seg, ExportEllipticalArc2D)
+            sb.AppendLine("EA " & Fmt(s.Center.X) & " " & Fmt(s.Center.Y) &
+                          " " & Fmt(s.MajorAxis.X) & " " & Fmt(s.MajorAxis.Y) &
+                          " " & Fmt(s.MinorAxis.X) & " " & Fmt(s.MinorAxis.Y) &
+                          " " & Fmt(s.StartAngle) & " " & Fmt(s.SweepAngle) &
+                          " " & s.Orientation.ToString(CultureInfo.InvariantCulture))
+
+        ElseIf TypeOf seg Is ExportBSpline2D Then
+            Dim s = DirectCast(seg, ExportBSpline2D)
+            Dim n As Integer = If(s.Nodes Is Nothing, 0, s.Nodes.Count)
+            Dim line As New StringBuilder()
+            line.Append("S " & If(s.ClosedCurve, "1", "0") & " " & n.ToString(CultureInfo.InvariantCulture))
+            If s.Nodes IsNot Nothing Then
+                For Each nd In s.Nodes
+                    line.Append(" " & Fmt(nd.X) & " " & Fmt(nd.Y))
+                Next
+            End If
+            sb.AppendLine(line.ToString())
+        End If
+    End Sub
+
+    Private Function ParseSegLine(key As String, rest As String) As ExportSegment2D
+        Dim t = rest.Split(New Char() {" "c}, StringSplitOptions.RemoveEmptyEntries)
+
+        Select Case key
+            Case "L"
+                If t.Length < 4 Then Return Nothing
+                Return New ExportLine2D(New Vec2(ParseD(t(0)), ParseD(t(1))), New Vec2(ParseD(t(2)), ParseD(t(3))))
+
+            Case "A"
+                If t.Length < 9 Then Return Nothing
+                Dim a As New ExportArc2D(New Vec2(ParseD(t(0)), ParseD(t(1))), ParseD(t(2)),
+                                         New Vec2(ParseD(t(3)), ParseD(t(4))), New Vec2(ParseD(t(5)), ParseD(t(6))),
+                                         t(7) = "1")
+                a.SweepDeg = ParseD(t(8))
+                Return a
+
+            Case "B"
+                If t.Length < 8 Then Return Nothing
+                Return New ExportCubicBezier2D(New Vec2(ParseD(t(0)), ParseD(t(1))), New Vec2(ParseD(t(2)), ParseD(t(3))),
+                                               New Vec2(ParseD(t(4)), ParseD(t(5))), New Vec2(ParseD(t(6)), ParseD(t(7))))
+
+            Case "E"
+                If t.Length < 6 Then Return Nothing
+                Return New ExportEllipse2D(New Vec2(ParseD(t(0)), ParseD(t(1))), ParseD(t(2)), ParseD(t(3)),
+                                           ParseD(t(4)), CInt(ParseD(t(5))))
+
+            Case "C"
+                If t.Length < 3 Then Return Nothing
+                Return New ExportCircle2D(New Vec2(ParseD(t(0)), ParseD(t(1))), ParseD(t(2)))
+
+            Case "EA"
+                If t.Length < 9 Then Return Nothing
+                Return New ExportEllipticalArc2D(New Vec2(ParseD(t(0)), ParseD(t(1))),
+                                                 New Vec2(ParseD(t(2)), ParseD(t(3))),
+                                                 New Vec2(ParseD(t(4)), ParseD(t(5))),
+                                                 ParseD(t(6)), ParseD(t(7)), CInt(ParseD(t(8))))
+
+            Case "S"
+                If t.Length < 2 Then Return Nothing
+                Dim closed As Boolean = (t(0) = "1")
+                Dim n As Integer = CInt(ParseD(t(1)))
+                Dim nodes As New List(Of Vec2)
+                Dim idx As Integer = 2
+                For k As Integer = 0 To n - 1
+                    If idx + 1 > t.Length - 1 Then Exit For
+                    nodes.Add(New Vec2(ParseD(t(idx)), ParseD(t(idx + 1))))
+                    idx += 2
+                Next
+                Return New ExportBSpline2D(nodes, closed)
+        End Select
+
+        Return Nothing
+    End Function
+
+    Private Function Fmt(v As Double) As String
+        Return v.ToString("R", CultureInfo.InvariantCulture)
+    End Function
+
+    Private Function ParseD(s As String) As Double
+        Dim v As Double
+        If Double.TryParse(s, NumberStyles.Float Or NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, v) Then Return v
+        If s.Trim().Equals("NaN", StringComparison.OrdinalIgnoreCase) Then Return Double.NaN
+        Return 0.0
+    End Function
+
+    Private Function ParseVec(rest As String) As Vec2
+        Dim t = rest.Split(New Char() {" "c}, StringSplitOptions.RemoveEmptyEntries)
+        If t.Length < 2 Then Return New Vec2(0, 0)
+        Return New Vec2(ParseD(t(0)), ParseD(t(1)))
     End Function
 
 End Module

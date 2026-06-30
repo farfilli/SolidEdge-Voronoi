@@ -44,6 +44,9 @@ Public Class MainForm
 
     Private ReadOnly btnReadSketchProfile As New Button()
     Private ReadOnly btnReadBlockDefaultView As New Button()
+    Private ReadOnly btnSaveBlocks As New Button()
+    Private ReadOnly btnLoadBlocks As New Button()
+    Private ReadOnly btnClearBlocks As New Button()
     Private currentBlockSymbols As New List(Of BlockDefinition)()
 
     Private ReadOnly domain As RectangleF = New RectangleF(0, 0, 1000, 700)
@@ -69,7 +72,7 @@ Public Class MainForm
     End Class
 
     Public Sub New()
-        Text = "Solid Edge Voronoi Generator - v1.3"
+        Text = "Solid Edge Voronoi Generator - v1.1"
         StartPosition = FormStartPosition.CenterScreen
         Width = 1550
         Height = 920
@@ -92,6 +95,9 @@ Public Class MainForm
         AddHandler btnShuffle.Click, AddressOf ShuffleSeed
         AddHandler btnReadSketchProfile.Click, AddressOf ReadSketchProfile_Click
         AddHandler btnReadBlockDefaultView.Click, AddressOf ReadBlockDefaultView_Click
+        AddHandler btnSaveBlocks.Click, AddressOf SaveBlocks_Click
+        AddHandler btnLoadBlocks.Click, AddressOf LoadBlocks_Click
+        AddHandler btnClearBlocks.Click, AddressOf ClearBlocks_Click
 
         AddHandler btnExportSvg.Click, AddressOf ExportSvg_Click
         AddHandler btnExportDxf.Click, AddressOf ExportDxf_Click
@@ -169,6 +175,9 @@ Public Class MainForm
         AddRowTitle("Sketch")
         AddRowControl(btnReadSketchProfile, 30)
         AddRowControl(btnReadBlockDefaultView, 30)
+        AddRowControl(btnLoadBlocks, 30)
+        AddRowControl(btnSaveBlocks, 30)
+        AddRowControl(btnClearBlocks, 30)
 
         AddRowTitle("Export")
         AddRowControl(btnExportSvg, 30)
@@ -369,6 +378,24 @@ Public Class MainForm
         btnReadBlockDefaultView.BackColor = Color.White
         btnReadBlockDefaultView.ForeColor = Color.FromArgb(30, 40, 55)
         btnReadBlockDefaultView.FlatStyle = FlatStyle.Flat
+
+        btnLoadBlocks.Text = "Load Blocks from File"
+        btnLoadBlocks.UseVisualStyleBackColor = False
+        btnLoadBlocks.BackColor = Color.White
+        btnLoadBlocks.ForeColor = Color.FromArgb(30, 40, 55)
+        btnLoadBlocks.FlatStyle = FlatStyle.Flat
+
+        btnSaveBlocks.Text = "Save Blocks to File"
+        btnSaveBlocks.UseVisualStyleBackColor = False
+        btnSaveBlocks.BackColor = Color.White
+        btnSaveBlocks.ForeColor = Color.FromArgb(30, 40, 55)
+        btnSaveBlocks.FlatStyle = FlatStyle.Flat
+
+        btnClearBlocks.Text = "Clear Blocks"
+        btnClearBlocks.UseVisualStyleBackColor = False
+        btnClearBlocks.BackColor = Color.White
+        btnClearBlocks.ForeColor = Color.FromArgb(30, 40, 55)
+        btnClearBlocks.FlatStyle = FlatStyle.Flat
 
         btnExportSvg.Text = "Export SVG"
         btnExportSvg.UseVisualStyleBackColor = False
@@ -1011,6 +1038,88 @@ Public Class MainForm
                         MessageBoxIcon.Error)
         End Try
     End Sub
+    Private Sub SaveBlocks_Click(sender As Object, e As EventArgs)
+        If currentBlockSymbols Is Nothing OrElse currentBlockSymbols.Count = 0 Then
+            MessageBox.Show("Nessun blocco in memoria da salvare.", "Save Blocks", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            Return
+        End If
+
+        Using dlg As New SaveFileDialog()
+            dlg.Title = "Salva libreria blocchi"
+            dlg.Filter = "SE-Voronoi blocks (*.sevb)|*.sevb"
+            dlg.DefaultExt = "sevb"
+            dlg.AddExtension = True
+            dlg.FileName = "blocks.sevb"
+
+            If dlg.ShowDialog(Me) = DialogResult.OK Then
+                Try
+                    ExportGeometry.SaveBlocksToFile(dlg.FileName, currentBlockSymbols)
+                    MessageBox.Show(currentBlockSymbols.Count & " blocco/i salvati.",
+                                    "Save Blocks", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                Catch ex As Exception
+                    MessageBox.Show("Errore salvataggio blocchi:" & Environment.NewLine & ex.Message,
+                                    "Save Blocks", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                End Try
+            End If
+        End Using
+    End Sub
+
+    Private Sub LoadBlocks_Click(sender As Object, e As EventArgs)
+        Using dlg As New OpenFileDialog()
+            dlg.Title = "Carica libreria blocchi"
+            dlg.Filter = "SE-Voronoi blocks (*.sevb)|*.sevb|Tutti i file (*.*)|*.*"
+            dlg.Multiselect = False
+
+            If dlg.ShowDialog(Me) = DialogResult.OK Then
+                Try
+                    Dim loaded = ExportGeometry.LoadBlocksFromFile(dlg.FileName)
+                    If loaded Is Nothing OrElse loaded.Count = 0 Then
+                        MessageBox.Show("Nessun blocco valido nel file.",
+                                        "Load Blocks", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                        Return
+                    End If
+
+                    If currentBlockSymbols Is Nothing Then currentBlockSymbols = New List(Of BlockDefinition)()
+                    currentBlockSymbols.AddRange(loaded)
+
+                    canvas.BlockSymbols = currentBlockSymbols
+                    cmbStyle.SelectedItem = CellRenderStyle.BlockSymbol.ToString()
+                    ApplyOptions()
+                    canvas.Invalidate()
+
+                    MessageBox.Show(loaded.Count & " blocco/i caricati (" & currentBlockSymbols.Count & " totali in memoria).",
+                                    "Load Blocks", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                Catch ex As Exception
+                    MessageBox.Show("Errore caricamento blocchi:" & Environment.NewLine & ex.Message,
+                                    "Load Blocks", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                End Try
+            End If
+        End Using
+    End Sub
+
+    Private Sub ClearBlocks_Click(sender As Object, e As EventArgs)
+        If currentBlockSymbols Is Nothing OrElse currentBlockSymbols.Count = 0 Then
+            MessageBox.Show("Nessun blocco in memoria.", "Clear Blocks", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            Return
+        End If
+
+        If MessageBox.Show("Rimuovere tutti i blocchi caricati dalla memoria?", "Clear Blocks",
+                           MessageBoxButtons.YesNo, MessageBoxIcon.Question) <> DialogResult.Yes Then Return
+
+        currentBlockSymbols = New List(Of BlockDefinition)()
+        canvas.BlockSymbols = currentBlockSymbols
+
+        ' Se lo stile corrente e' a blocchi, non avrebbe piu' nulla da disegnare:
+        ' si torna a un contorno curvo.
+        If cmbStyle.SelectedItem IsNot Nothing AndAlso
+           cmbStyle.SelectedItem.ToString() = CellRenderStyle.BlockSymbol.ToString() Then
+            cmbStyle.SelectedItem = CellRenderStyle.Curved.ToString()
+        End If
+
+        ApplyOptions()
+        canvas.Invalidate()
+    End Sub
+
     Private Function ConvertToCanvasDomains(domains As List(Of SketchDomainRegion)) As List(Of CanvasSketchDomain)
         Dim result As New List(Of CanvasSketchDomain)
 
