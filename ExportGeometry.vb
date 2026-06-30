@@ -1411,4 +1411,205 @@ Public Module ExportGeometry
         Return GetStableRandomSymbolStyle(canvas, cellIndex)
     End Function
 
+    ' ===== Riempimento: costruzione degli anelli chiusi di una cella =====
+    ' I blocchi memorizzano ogni linea/arco come path APERTO separato; per
+    ' riempire correttamente bisogna prima concatenare i segmenti che condividono
+    ' gli estremi in anelli chiusi. Le primitive gia' chiuse (ellisse, cerchio,
+    ' spline chiusa) diventano subito un anello. Il risultato (in world) va poi
+    ' riempito con regola even-odd, cosi' i profili interni diventano fori.
+    Public Function BuildCellFillLoops(cg As CellGeometry) As List(Of List(Of Vec2))
+        Dim loops As New List(Of List(Of Vec2))
+        If cg Is Nothing OrElse cg.StyledPaths Is Nothing OrElse cg.StyledPaths.Count = 0 Then Return loops
+
+        Dim flats As New List(Of List(Of Vec2))
+        Dim closedHint As New List(Of Boolean)
+        Dim minX As Double = Double.MaxValue, minY As Double = Double.MaxValue
+        Dim maxX As Double = Double.MinValue, maxY As Double = Double.MinValue
+
+        For Each sp In cg.StyledPaths
+            Dim poly = FlattenStyledPath(sp)
+            If poly Is Nothing OrElse poly.Count < 2 Then Continue For
+            flats.Add(poly)
+            closedHint.Add(sp.Closed)
+            For Each p In poly
+                If p.X < minX Then minX = p.X
+                If p.Y < minY Then minY = p.Y
+                If p.X > maxX Then maxX = p.X
+                If p.Y > maxY Then maxY = p.Y
+            Next
+        Next
+
+        If flats.Count = 0 Then Return loops
+
+        Dim diag As Double = Math.Sqrt((maxX - minX) * (maxX - minX) + (maxY - minY) * (maxY - minY))
+        Dim tol As Double = Math.Max(diag * 0.0005, 0.000001)
+        Dim closeTol As Double = Math.Max(diag * 0.002, tol)
+
+        Dim openPieces As New List(Of List(Of Vec2))
+        For i As Integer = 0 To flats.Count - 1
+            Dim poly = flats(i)
+            Dim selfClosed As Boolean = closedHint(i) OrElse Geo2D.Distance(poly(0), poly(poly.Count - 1)) <= closeTol
+            If selfClosed AndAlso poly.Count >= 3 Then
+                loops.Add(poly)
+            Else
+                openPieces.Add(poly)
+            End If
+        Next
+
+        loops.AddRange(ChainOpenPieces(openPieces, tol, closeTol))
+        Return loops
+    End Function
+
+    Private Function ChainOpenPieces(pieces As List(Of List(Of Vec2)), tol As Double, closeTol As Double) As List(Of List(Of Vec2))
+        Dim loops As New List(Of List(Of Vec2))
+        Dim remaining As New List(Of List(Of Vec2))(pieces)
+
+        Do While remaining.Count > 0
+            Dim cur As New List(Of Vec2)(remaining(0))
+            remaining.RemoveAt(0)
+
+            Dim extended As Boolean = True
+            Do While extended AndAlso remaining.Count > 0
+                extended = False
+                Dim head As Vec2 = cur(0)
+                Dim tail As Vec2 = cur(cur.Count - 1)
+
+                For i As Integer = 0 To remaining.Count - 1
+                    Dim pc = remaining(i)
+                    Dim f As Vec2 = pc(0)
+                    Dim l As Vec2 = pc(pc.Count - 1)
+
+                    If Geo2D.Distance(tail, f) <= tol Then
+                        For k As Integer = 1 To pc.Count - 1
+                            cur.Add(pc(k))
+                        Next
+                        remaining.RemoveAt(i) : extended = True : Exit For
+                    ElseIf Geo2D.Distance(tail, l) <= tol Then
+                        Dim r As New List(Of Vec2)(pc) : r.Reverse()
+                        For k As Integer = 1 To r.Count - 1
+                            cur.Add(r(k))
+                        Next
+                        remaining.RemoveAt(i) : extended = True : Exit For
+                    ElseIf Geo2D.Distance(head, l) <= tol Then
+                        Dim merged As New List(Of Vec2)(pc)
+                        For k As Integer = 1 To cur.Count - 1
+                            merged.Add(cur(k))
+                        Next
+                        cur = merged
+                        remaining.RemoveAt(i) : extended = True : Exit For
+                    ElseIf Geo2D.Distance(head, f) <= tol Then
+                        Dim r As New List(Of Vec2)(pc) : r.Reverse()
+                        Dim merged As New List(Of Vec2)(r)
+                        For k As Integer = 1 To cur.Count - 1
+                            merged.Add(cur(k))
+                        Next
+                        cur = merged
+                        remaining.RemoveAt(i) : extended = True : Exit For
+                    End If
+                Next
+            Loop
+
+            ' Si aggiunge come anello solo se chiuso: i tratti aperti (decorazioni)
+            ' restano comunque tracciati a parte, quindi non riempirli e' corretto.
+            If cur.Count >= 3 AndAlso Geo2D.Distance(cur(0), cur(cur.Count - 1)) <= closeTol Then
+                loops.Add(cur)
+            End If
+        Loop
+
+        Return loops
+    End Function
+
+    Private Function FlattenStyledPath(sp As ExportPath2D) As List(Of Vec2)
+        Dim pts As New List(Of Vec2)
+        If sp Is Nothing OrElse sp.Segments Is Nothing Then Return pts
+
+        For Each seg In sp.Segments
+            Dim segPts = FlattenSegment(seg)
+            For Each p In segPts
+                If pts.Count = 0 OrElse Geo2D.Distance(pts(pts.Count - 1), p) > 0.000001 Then
+                    pts.Add(p)
+                End If
+            Next
+        Next
+        Return pts
+    End Function
+
+    Private Function FlattenSegment(seg As ExportSegment2D) As List(Of Vec2)
+        Dim pts As New List(Of Vec2)
+
+        If TypeOf seg Is ExportLine2D Then
+            Dim ln = DirectCast(seg, ExportLine2D)
+            pts.Add(ln.P1)
+            pts.Add(ln.P2)
+
+        ElseIf TypeOf seg Is ExportArc2D Then
+            pts.AddRange(SampleArc2D(DirectCast(seg, ExportArc2D)))
+
+        ElseIf TypeOf seg Is ExportCubicBezier2D Then
+            Dim bz = DirectCast(seg, ExportCubicBezier2D)
+            Dim steps As Integer = 18
+            For i As Integer = 0 To steps
+                Dim t As Double = i / CDbl(steps)
+                pts.Add(EvalCubicBezier(bz.P0, bz.C1, bz.C2, bz.P3, t))
+            Next
+
+        ElseIf TypeOf seg Is ExportEllipse2D Then
+            Dim el = DirectCast(seg, ExportEllipse2D)
+            pts.AddRange(SampleEllipse(el.Center, el.RadiusMajor, el.RadiusMinor, el.RotationRad, 96))
+
+        ElseIf TypeOf seg Is ExportCircle2D Then
+            Dim ci = DirectCast(seg, ExportCircle2D)
+            Dim steps As Integer = 72
+            For i As Integer = 0 To steps
+                Dim a As Double = (i / CDbl(steps)) * Math.PI * 2.0
+                pts.Add(New Vec2(ci.Center.X + Math.Cos(a) * ci.Radius, ci.Center.Y + Math.Sin(a) * ci.Radius))
+            Next
+
+        ElseIf TypeOf seg Is ExportEllipticalArc2D Then
+            Dim ea = DirectCast(seg, ExportEllipticalArc2D)
+            pts.AddRange(SampleEllipticalArc(ea.Center, ea.MajorAxis, ea.MinorAxis, ea.StartAngle, ea.SweepAngle, ea.Orientation))
+
+        ElseIf TypeOf seg Is ExportBSpline2D Then
+            Dim bs = DirectCast(seg, ExportBSpline2D)
+            pts.AddRange(SampleBSpline(bs.Nodes, bs.ClosedCurve))
+        End If
+
+        Return pts
+    End Function
+
+    Private Function SampleArc2D(arc As ExportArc2D) As List(Of Vec2)
+        Dim pts As New List(Of Vec2)
+        Dim c = arc.Center
+        Dim a1 As Double = Math.Atan2(arc.StartPoint.Y - c.Y, arc.StartPoint.X - c.X)
+
+        Dim sweepDeg As Double
+        If Not Double.IsNaN(arc.SweepDeg) Then
+            sweepDeg = arc.SweepDeg
+        Else
+            Dim a2 As Double = Math.Atan2(arc.EndPoint.Y - c.Y, arc.EndPoint.X - c.X)
+            sweepDeg = (a2 - a1) * 180.0 / Math.PI
+            While sweepDeg <= -180.0
+                sweepDeg += 360.0
+            End While
+            While sweepDeg > 180.0
+                sweepDeg -= 360.0
+            End While
+        End If
+
+        Dim sweepRad As Double = sweepDeg * Math.PI / 180.0
+        Dim steps As Integer = Math.Max(2, CInt(Math.Ceiling(Math.Abs(sweepDeg) / 6.0)))
+        For i As Integer = 0 To steps
+            Dim a As Double = a1 + sweepRad * (i / CDbl(steps))
+            pts.Add(New Vec2(c.X + Math.Cos(a) * arc.Radius, c.Y + Math.Sin(a) * arc.Radius))
+        Next
+        Return pts
+    End Function
+
+    Private Function EvalCubicBezier(p0 As Vec2, c1 As Vec2, c2 As Vec2, p3 As Vec2, t As Double) As Vec2
+        Dim u As Double = 1.0 - t
+        Dim x = u * u * u * p0.X + 3.0 * u * u * t * c1.X + 3.0 * u * t * t * c2.X + t * t * t * p3.X
+        Dim y = u * u * u * p0.Y + 3.0 * u * u * t * c1.Y + 3.0 * u * t * t * c2.Y + t * t * t * p3.Y
+        Return New Vec2(x, y)
+    End Function
+
 End Module

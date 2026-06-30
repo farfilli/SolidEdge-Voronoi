@@ -66,6 +66,7 @@ Public Class VoronoiCanvas
     Public Property ShowSketchBoundary As Boolean = True
 
     Public Property FillCells As Boolean = True
+    Public Property FillSymbols As Boolean = False
     Public Property ShowOuterEdges As Boolean = True
     Public Property ShowSeeds As Boolean = True
     Public Property ShowInnerCurve As Boolean = True
@@ -245,21 +246,69 @@ Public Class VoronoiCanvas
             If cg.EffectiveStyle = CellRenderStyle.Straight Then Continue For
             If cg.EffectiveStyle = CellRenderStyle.Curved AndAlso Not ShowInnerCurve Then Continue For
 
+            ' Path schermo di tutti i sotto-profili della cella.
+            Dim cellPaths As New List(Of GraphicsPath)
+            Dim cellSegs As New List(Of ExportPath2D)
             For Each sp In cg.StyledPaths
-                Using path As GraphicsPath = ToScreenPath(sp, view)
-                    If path Is Nothing Then Continue For
-                    Using pen As New Pen(sp.StrokeColor, CSng(sp.StrokeWidth))
-                        pen.LineJoin = LineJoin.Round
-                        pen.StartCap = LineCap.Round
-                        pen.EndCap = LineCap.Round
-                        Try
-                            g.DrawPath(pen, path)
-                        Catch
-                            ' Geometria degenere sfuggita ai filtri: si salta
-                            ' questo path senza far crashare il rendering.
-                        End Try
-                    End Using
+                Dim p = ToScreenPath(sp, view)
+                If p IsNot Nothing Then
+                    cellPaths.Add(p)
+                    cellSegs.Add(sp)
+                End If
+            Next
+            If cellPaths.Count = 0 Then Continue For
+
+            ' FILL: anelli chiusi della cella (segmenti concatenati) in UN solo
+            ' path con regola even-odd, cosi' i profili interni diventano fori e
+            ' anche i contorni "articolati" (fatti di tanti segmenti) si riempiono.
+            If FillSymbols Then
+                Try
+                    Dim loops = ExportGeometry.BuildCellFillLoops(cg)
+                    If loops.Count > 0 Then
+                        Using composite As New GraphicsPath()
+                            composite.FillMode = FillMode.Alternate
+                            For Each lp In loops
+                                If lp.Count < 3 Then Continue For
+                                Dim scr(lp.Count - 1) As PointF
+                                Dim okPts As Boolean = True
+                                For k As Integer = 0 To lp.Count - 1
+                                    Dim spt = WorldToScreen(lp(k), view)
+                                    If Not IsSanePt(spt) Then
+                                        okPts = False
+                                        Exit For
+                                    End If
+                                    scr(k) = spt
+                                Next
+                                If okPts Then composite.AddPolygon(scr)
+                            Next
+                            Dim fc = ExportGeometry.GetExportCellColor(cg.CellIndex)
+                            Using br As New SolidBrush(Color.FromArgb(235, fc.R, fc.G, fc.B))
+                                g.FillPath(br, composite)
+                            End Using
+                        End Using
+                    End If
+                Catch
+                    ' Geometria non riempibile: si ignora il fill.
+                End Try
+            End If
+
+            ' STROKE: ogni sotto-profilo col proprio bordo.
+            For k As Integer = 0 To cellPaths.Count - 1
+                Dim sp = cellSegs(k)
+                Using pen As New Pen(sp.StrokeColor, CSng(sp.StrokeWidth))
+                    pen.LineJoin = LineJoin.Round
+                    pen.StartCap = LineCap.Round
+                    pen.EndCap = LineCap.Round
+                    Try
+                        g.DrawPath(pen, cellPaths(k))
+                    Catch
+                        ' Geometria degenere sfuggita ai filtri: si salta.
+                    End Try
                 End Using
+            Next
+
+            For Each p In cellPaths
+                p.Dispose()
             Next
         Next
     End Sub

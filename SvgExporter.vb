@@ -164,11 +164,41 @@ Public Module SvgExporter
         For Each cg In geoms
             If cg.EffectiveStyle = CellRenderStyle.Straight Then Continue For
             If cg.EffectiveStyle = CellRenderStyle.Curved AndAlso Not canvas.ShowInnerCurve Then Continue For
-            For Each sp In cg.StyledPaths
-                Dim d = BuildPathData(sp)
-                If String.IsNullOrEmpty(d) Then Continue For
-                sb.AppendLine($"    <path d=""{d}"" fill=""{FillToSvg(sp.FillColor)}"" stroke=""{ColorToSvg(sp.StrokeColor)}"" stroke-width=""{F(sp.StrokeWidth)}"" />")
-            Next
+
+            If canvas.FillSymbols Then
+                ' Riempimento: anelli chiusi della cella (segmenti concatenati) in
+                ' un unico path con fill-rule even-odd (profili interni = fori,
+                ' contorni articolati riempiti). Lo stroke resta dalle primitive.
+                Dim loops = ExportGeometry.BuildCellFillLoops(cg)
+                If loops.Count > 0 Then
+                    Dim fillD As New StringBuilder()
+                    For Each lp In loops
+                        If lp.Count < 3 Then Continue For
+                        If fillD.Length > 0 Then fillD.Append(" ")
+                        fillD.Append($"M {F(lp(0).X)} {F(lp(0).Y)} ")
+                        For k As Integer = 1 To lp.Count - 1
+                            fillD.Append($"L {F(lp(k).X)} {F(lp(k).Y)} ")
+                        Next
+                        fillD.Append("Z")
+                    Next
+                    If fillD.Length > 0 Then
+                        Dim col As String = ColorToSvg(ExportGeometry.GetExportCellColor(cg.CellIndex))
+                        sb.AppendLine($"    <path d=""{fillD}"" fill=""{col}"" fill-opacity=""0.92"" fill-rule=""evenodd"" stroke=""none"" />")
+                    End If
+                End If
+                ' Bordi delle primitive originali.
+                For Each sp In cg.StyledPaths
+                    Dim d = BuildPathData(sp)
+                    If String.IsNullOrEmpty(d) Then Continue For
+                    sb.AppendLine($"    <path d=""{d}"" fill=""none"" stroke=""{ColorToSvg(sp.StrokeColor)}"" stroke-width=""{F(sp.StrokeWidth)}"" />")
+                Next
+            Else
+                For Each sp In cg.StyledPaths
+                    Dim d = BuildPathData(sp)
+                    If String.IsNullOrEmpty(d) Then Continue For
+                    sb.AppendLine($"    <path d=""{d}"" fill=""{FillToSvg(sp.FillColor)}"" stroke=""{ColorToSvg(sp.StrokeColor)}"" stroke-width=""{F(sp.StrokeWidth)}"" />")
+                Next
+            End If
         Next
         sb.AppendLine("  </g>")
 

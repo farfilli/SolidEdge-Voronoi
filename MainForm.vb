@@ -28,6 +28,7 @@ Public Class MainForm
     Private ReadOnly numCurveWidth As New NumericUpDown()
 
     Private ReadOnly chkFill As New CheckBox()
+    Private ReadOnly chkFillSymbols As New CheckBox()
     Private ReadOnly chkOuter As New CheckBox()
     Private ReadOnly chkSeeds As New CheckBox()
     Private ReadOnly chkInner As New CheckBox()
@@ -68,7 +69,7 @@ Public Class MainForm
     End Class
 
     Public Sub New()
-        Text = "Solid Edge Voronoi Generator - v1.2"
+        Text = "Solid Edge Voronoi Generator - v1.3"
         StartPosition = FormStartPosition.CenterScreen
         Width = 1550
         Height = 920
@@ -97,6 +98,7 @@ Public Class MainForm
         AddHandler btnToSolidEdge.Click, AddressOf ExportToSolidEdge_Click
 
         AddHandler chkFill.CheckedChanged, AddressOf RefreshCanvasOptions
+        AddHandler chkFillSymbols.CheckedChanged, AddressOf RefreshCanvasOptions
         AddHandler chkOuter.CheckedChanged, AddressOf RefreshCanvasOptions
         AddHandler chkSeeds.CheckedChanged, AddressOf RefreshCanvasOptions
         AddHandler chkInner.CheckedChanged, AddressOf RefreshCanvasOptions
@@ -155,6 +157,7 @@ Public Class MainForm
              "Curve Width", numCurveWidth)
 
         AddRowControl(chkFill)
+        AddRowControl(chkFillSymbols)
         AddRowControl(chkOuter)
         AddRowControl(chkSeeds)
         AddRowControl(chkInner)
@@ -311,6 +314,10 @@ Public Class MainForm
         chkFill.Checked = True
         chkFill.ForeColor = Color.FromArgb(30, 40, 55)
 
+        chkFillSymbols.Text = "Fill symbols"
+        chkFillSymbols.Checked = False
+        chkFillSymbols.ForeColor = Color.FromArgb(30, 40, 55)
+
         chkOuter.Text = "Show outer edges"
         chkOuter.Checked = True
         chkOuter.ForeColor = Color.FromArgb(30, 40, 55)
@@ -333,6 +340,7 @@ Public Class MainForm
         chkExportAsBlocks.Margin = New Padding(3, 1, 3, 1)
 
         chkFill.Margin = New Padding(3, 1, 3, 1)
+        chkFillSymbols.Margin = New Padding(3, 1, 3, 1)
         chkOuter.Margin = New Padding(3, 1, 3, 1)
         chkSeeds.Margin = New Padding(3, 1, 3, 1)
         chkInner.Margin = New Padding(3, 1, 3, 1)
@@ -811,6 +819,7 @@ Public Class MainForm
 
     Private Sub ApplyOptions()
         canvas.FillCells = chkFill.Checked
+        canvas.FillSymbols = chkFillSymbols.Checked
         canvas.ShowOuterEdges = chkOuter.Checked
         canvas.ShowSeeds = chkSeeds.Checked
         canvas.ShowInnerCurve = chkInner.Checked
@@ -838,6 +847,9 @@ Public Class MainForm
 
         numCellScale.Enabled = isSymbol
         chkRandomRotation.Enabled = isSymbol
+
+        ' "Fill symbols" ha senso solo dove c'e' un path interno (curva o simbolo).
+        chkFillSymbols.Enabled = usesVertices OrElse isSymbol
     End Sub
 
     Private Function VertexModeFromUi() As SymbolCornerStyle
@@ -976,16 +988,9 @@ Public Class MainForm
                 Return
             End If
 
-            Dim diag As String = BlockDiag.DescribeBlocks(defs, "RAW (pre-normalize)")
-
             For Each d In defs
                 ExportGeometry.NormalizeBlockInPlace(d)
             Next
-            'diag &= Environment.NewLine & BlockDiag.DescribeBlocks(defs, "NORMALIZED")
-            'Dim diagPath = System.IO.Path.Combine(
-            '    Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "block_diag.txt")
-            'System.IO.File.WriteAllText(diagPath, diag)
-            'MessageBox.Show("Diagnostica scritta in: " & diagPath)
 
             currentBlockSymbols = defs
             canvas.BlockSymbols = defs
