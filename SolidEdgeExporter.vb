@@ -963,7 +963,7 @@ Public Module SolidEdgeExporter
 
     ' Export per-cella: le celle a blocco diventano occorrenze native (BlockOccurrences.Add),
     ' le altre vengono emesse come geometria (linee/archi/spline) come prima.
-    Public Sub ExportToActivePartSketch(geoms As List(Of CellGeometry))
+    Public Sub ExportToActivePartSketch(geoms As List(Of CellGeometry), Optional blockDefs As List(Of BlockDefinition) = Nothing)
         Dim app As Object = Nothing
         Dim doc As Object = Nothing
         Dim profile As Object = Nothing
@@ -1000,10 +1000,32 @@ Public Module SolidEdgeExporter
                 blockOccurrences = Nothing
             End Try
 
+            ' Mappa nome->definizione (per creare i blocchi mancanti) e set dei
+            ' nomi gia' verificati/creati in questa esportazione.
+            Dim defByName As New Dictionary(Of String, BlockDefinition)(StringComparer.OrdinalIgnoreCase)
+            If blockDefs IsNot Nothing Then
+                For Each bd In blockDefs
+                    If bd IsNot Nothing AndAlso Not String.IsNullOrEmpty(bd.Name) AndAlso Not defByName.ContainsKey(bd.Name) Then
+                        defByName.Add(bd.Name, bd)
+                    End If
+                Next
+            End If
+            Dim ensured As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+
             For Each cg In geoms
                 If cg Is Nothing Then Continue For
 
                 If cg.HasBlock AndAlso Not String.IsNullOrEmpty(cg.BlockName) AndAlso blockOccurrences IsNot Nothing Then
+                    ' Se il blocco non e' ancora presente nel documento, crealo dalle
+                    ' entita' native prima di inserire l'occorrenza.
+                    If Not ensured.Contains(cg.BlockName) Then
+                        Dim def As BlockDefinition = Nothing
+                        defByName.TryGetValue(cg.BlockName, def)
+                        EnsureBlockDefinition(doc, cg.BlockName, def,
+                                              lines2d, arcs2d, bSplineCurves2d, ellipses2d, circles2d, ellipticalArcs2d)
+                        ensured.Add(cg.BlockName)
+                    End If
+
                     blockOccurrences.Add(
                         BlockName:=cg.BlockName,
                         xOrigin:=cg.BlockOriginX,
@@ -1036,6 +1058,72 @@ Public Module SolidEdgeExporter
         End Try
     End Sub
 
+    ' Crea la definizione del blocco in Solid Edge se non gia' presente.
+    ' Passi: (1) verifica nome nella collection Blocks; (2) disegna la geometria
+    ' NATIVA (de-normalizzata) nel profilo raccogliendo gli oggetti creati;
+    ' (3) li aggiunge al SelectSet; (4) Blocks.Add(name, x, y, True, True).
+    ' NOTA: gli accessi doc.Blocks / doc.SelectSet e Blocks.Add sono gli accessori
+    ' SE piu' probabili; se al test qualcuno risultasse diverso, va corretto qui.
+    Private Function EnsureBlockDefinition(doc As Object, name As String, def As BlockDefinition,
+                                           lines2d As Object, arcs2d As Object, bSplineCurves2d As Object,
+                                           ellipses2d As Object, circles2d As Object, ellipticalArcs2d As Object) As Boolean
+        Try
+            ' (1) gia' presente?
+            If BlockNameExists(doc, name) Then Return True
+            If def Is Nothing OrElse def.Entities Is Nothing OrElse def.Entities.Count = 0 Then Return False
+            If def.NativeRadius <= 0.000001 Then Return False
+
+            ' (2) geometria nativa disegnata nel profilo, raccogliendo gli oggetti.
+            Dim created As New List(Of Object)
+            For Each pth In def.Entities
+                Dim nativePath = ExportGeometry.DenormalizeBlockPath(pth, def)
+                EmitPathGeometry(nativePath, lines2d, arcs2d, bSplineCurves2d, ellipses2d, circles2d, ellipticalArcs2d, created)
+            Next
+            If created.Count = 0 Then Return False
+
+            ' (3) selezione della sola geometria appena creata.
+            Dim ss As Object = Nothing
+            Try
+                ss = doc.SelectSet
+            Catch
+            End Try
+            If ss Is Nothing Then Return False
+            Try : ss.RemoveAll() : Catch : End Try
+            For Each o In created
+                Try : ss.Add(o) : Catch : End Try
+            Next
+
+            ' (4) creazione blocco. XOrigin/YOrigin = BaseOrigin in metri SE
+            ' (FlipX + /1000, stessa convenzione della geometria). Optional entrambi True.
+            Dim xo As Double = def.BaseOrigin.X / 1000.0
+            Dim yo As Double = -def.BaseOrigin.Y / 1000.0
+            doc.Blocks.Add(name, xo, yo, True, True)
+            Return True
+
+        Catch
+            ' Se la creazione fallisce, l'occorrenza successiva dara' errore come prima:
+            ' non blocchiamo l'intera esportazione.
+            Return False
+        End Try
+    End Function
+
+    Private Function BlockNameExists(doc As Object, name As String) As Boolean
+        Try
+            Dim blocks As Object = doc.Blocks
+            If blocks Is Nothing Then Return False
+            Dim n As Integer = CInt(blocks.Count)
+            For i As Integer = 1 To n
+                Dim blk As Object = blocks.Item(i)
+                If blk Is Nothing Then Continue For
+                Dim nm As String = ""
+                Try : nm = CStr(blk.Name) : Catch : End Try
+                If String.Equals(nm, name, StringComparison.OrdinalIgnoreCase) Then Return True
+            Next
+        Catch
+        End Try
+        Return False
+    End Function
+
     ' Emissione di un singolo path come geometria 2D nello sketch attivo.
     Private Sub EmitPathGeometry(path As ExportPath2D,
                                  lines2d As Object,
@@ -1043,16 +1131,18 @@ Public Module SolidEdgeExporter
                                  bSplineCurves2d As Object,
                                  ellipses2d As Object,
                                  circles2d As Object,
-                                 ellipticalArcs2d As Object)
+                                 ellipticalArcs2d As Object,
+                                 Optional created As List(Of Object) = Nothing)
         If path Is Nothing OrElse path.Segments Is Nothing Then Return
 
         For Each seg In path.Segments
+            Dim madeObj As Object = Nothing
             If TypeOf seg Is ExportLine2D Then
                 Dim ln = DirectCast(seg, ExportLine2D)
                 Dim p1 = FlipX(ln.P1)
                 Dim p2 = FlipX(ln.P2)
 
-                lines2d.AddBy2Points(
+                madeObj = lines2d.AddBy2Points(
                     x1:=p1.X / 1000.0,
                     y1:=p1.Y / 1000.0,
                     x2:=p2.X / 1000.0,
@@ -1084,7 +1174,7 @@ Public Module SolidEdgeExporter
                 End If
 
                 If swapEnds Then
-                    arcs2d.AddByCenterStartEnd(
+                    madeObj = arcs2d.AddByCenterStartEnd(
                         xCenter:=cx,
                         yCenter:=cy,
                         xStart:=ex,
@@ -1092,7 +1182,7 @@ Public Module SolidEdgeExporter
                         xEnd:=sx,
                         yEnd:=sy)
                 Else
-                    arcs2d.AddByCenterStartEnd(
+                    madeObj = arcs2d.AddByCenterStartEnd(
                         xCenter:=cx,
                         yCenter:=cy,
                         xStart:=sx,
@@ -1121,7 +1211,7 @@ Public Module SolidEdgeExporter
                     1.0, 1.0, 1.0, 1.0
                 }
 
-                bSplineCurves2d.Add(3, 4, poles, knots)
+                madeObj = bSplineCurves2d.Add(3, 4, poles, knots)
 
             ElseIf TypeOf seg Is ExportEllipse2D Then
                 Dim el = DirectCast(seg, ExportEllipse2D)
@@ -1138,7 +1228,7 @@ Public Module SolidEdgeExporter
                 Dim majSEy As Double = -majVyW / 1000.0
                 Dim ratio As Double = If(el.RadiusMajor <> 0.0, el.RadiusMinor / el.RadiusMajor, 1.0)
 
-                ellipses2d.AddByCenter(
+                madeObj = ellipses2d.AddByCenter(
                     cf.X / 1000.0,
                     cf.Y / 1000.0,
                     majSEx,
@@ -1149,7 +1239,7 @@ Public Module SolidEdgeExporter
             ElseIf TypeOf seg Is ExportCircle2D Then
                 Dim ci = DirectCast(seg, ExportCircle2D)
                 Dim cf = FlipX(ci.Center)
-                circles2d.AddByCenterRadius(
+                madeObj = circles2d.AddByCenterRadius(
                     cf.X / 1000.0,
                     cf.Y / 1000.0,
                     ci.Radius / 1000.0)
@@ -1169,7 +1259,7 @@ Public Module SolidEdgeExporter
                 ' lungo, ~360-sweep, quasi ellissi intere).
                 Dim effSweep As Double = If(ea.Orientation = 1, ea.SweepAngle, -ea.SweepAngle)
 
-                ellipticalArcs2d.AddByCenter(
+                madeObj = ellipticalArcs2d.AddByCenter(
                     cf.X / 1000.0,
                     cf.Y / 1000.0,
                     mvf.X / 1000.0,
@@ -1196,9 +1286,10 @@ Public Module SolidEdgeExporter
                     ' elementi -> DISP_E_BADINDEX (indice non valido).
                     ' Order = 3 come l'uso esistente di .Add in questo file; se la
                     ' curva risultasse troppo "spigolosa", provare 4.
-                    bSplineCurves2d.AddByPointsWithCloseOption(3, cnt, arr, bs.ClosedCurve)
+                    madeObj = bSplineCurves2d.AddByPointsWithCloseOption(3, cnt, arr, bs.ClosedCurve)
                 End If
             End If
+            If created IsNot Nothing AndAlso madeObj IsNot Nothing Then created.Add(madeObj)
         Next
     End Sub
 

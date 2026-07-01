@@ -1,6 +1,7 @@
 ﻿Imports System
 Imports System.Collections.Generic
 Imports System.Drawing
+Imports System.Drawing.Drawing2D
 Imports System.IO
 Imports System.Linq
 Imports System.Text
@@ -47,6 +48,8 @@ Public Class MainForm
     Private ReadOnly btnSaveBlocks As New Button()
     Private ReadOnly btnLoadBlocks As New Button()
     Private ReadOnly btnClearBlocks As New Button()
+    Private ReadOnly btnBlockLibrary As New Button()
+    Private blockLibForm As BlockLibraryForm = Nothing
     Private currentBlockSymbols As New List(Of BlockDefinition)()
 
     Private ReadOnly domain As RectangleF = New RectangleF(0, 0, 1000, 700)
@@ -98,6 +101,7 @@ Public Class MainForm
         AddHandler btnSaveBlocks.Click, AddressOf SaveBlocks_Click
         AddHandler btnLoadBlocks.Click, AddressOf LoadBlocks_Click
         AddHandler btnClearBlocks.Click, AddressOf ClearBlocks_Click
+        AddHandler btnBlockLibrary.Click, AddressOf OpenBlockLibrary_Click
 
         AddHandler btnExportSvg.Click, AddressOf ExportSvg_Click
         AddHandler btnExportDxf.Click, AddressOf ExportDxf_Click
@@ -105,6 +109,7 @@ Public Class MainForm
 
         AddHandler chkFill.CheckedChanged, AddressOf RefreshCanvasOptions
         AddHandler chkFillSymbols.CheckedChanged, AddressOf RefreshCanvasOptions
+        AddHandler chkFillSymbols.CheckedChanged, AddressOf FillSymbols_RefreshLibrary
         AddHandler chkOuter.CheckedChanged, AddressOf RefreshCanvasOptions
         AddHandler chkSeeds.CheckedChanged, AddressOf RefreshCanvasOptions
         AddHandler chkInner.CheckedChanged, AddressOf RefreshCanvasOptions
@@ -178,6 +183,7 @@ Public Class MainForm
         AddRowControl(btnLoadBlocks, 30)
         AddRowControl(btnSaveBlocks, 30)
         AddRowControl(btnClearBlocks, 30)
+        AddRowControl(btnBlockLibrary, 30)
 
         AddRowTitle("Export")
         AddRowControl(btnExportSvg, 30)
@@ -324,7 +330,7 @@ Public Class MainForm
         chkFill.ForeColor = Color.FromArgb(30, 40, 55)
 
         chkFillSymbols.Text = "Fill symbols"
-        chkFillSymbols.Checked = False
+        chkFillSymbols.Checked = True
         chkFillSymbols.ForeColor = Color.FromArgb(30, 40, 55)
 
         chkOuter.Text = "Show outer edges"
@@ -396,6 +402,12 @@ Public Class MainForm
         btnClearBlocks.BackColor = Color.White
         btnClearBlocks.ForeColor = Color.FromArgb(30, 40, 55)
         btnClearBlocks.FlatStyle = FlatStyle.Flat
+
+        btnBlockLibrary.Text = "Block Library / Preview"
+        btnBlockLibrary.UseVisualStyleBackColor = False
+        btnBlockLibrary.BackColor = Color.FromArgb(0, 188, 212)
+        btnBlockLibrary.ForeColor = Color.FromArgb(8, 6, 53)
+        btnBlockLibrary.FlatStyle = FlatStyle.Flat
 
         btnExportSvg.Text = "Export SVG"
         btnExportSvg.UseVisualStyleBackColor = False
@@ -1019,14 +1031,17 @@ Public Class MainForm
                 ExportGeometry.NormalizeBlockInPlace(d)
             Next
 
-            currentBlockSymbols = defs
-            canvas.BlockSymbols = defs
+            Dim addedCount As Integer = AddBlocksUnique(defs)
+            canvas.BlockSymbols = currentBlockSymbols
 
             cmbStyle.SelectedItem = CellRenderStyle.BlockSymbol.ToString()
             ApplyOptions()
             canvas.Invalidate()
 
-            MessageBox.Show(defs.Count & " block(s) loaded as cell symbols.",
+            RefreshBlockLibraryIfOpen()
+
+            MessageBox.Show(addedCount & " block(s) added (" & currentBlockSymbols.Count & " in memory, " &
+                            (defs.Count - addedCount) & " duplicate(s) skipped).",
                         "Solid Edge blocks",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information)
@@ -1066,36 +1081,71 @@ Public Class MainForm
 
     Private Sub LoadBlocks_Click(sender As Object, e As EventArgs)
         Using dlg As New OpenFileDialog()
-            dlg.Title = "Carica libreria blocchi"
-            dlg.Filter = "SE-Voronoi blocks (*.sevb)|*.sevb|Tutti i file (*.*)|*.*"
-            dlg.Multiselect = False
+            dlg.Title = "Load block library"
+            dlg.Filter = "SE-Voronoi blocks (*.sevb)|*.sevb|All files (*.*)|*.*"
+            dlg.Multiselect = True
 
-            If dlg.ShowDialog(Me) = DialogResult.OK Then
+            If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
+
+            Dim totalRead As Integer = 0
+            Dim totalAdded As Integer = 0
+            Dim errors As New List(Of String)
+
+            For Each fn In dlg.FileNames
                 Try
-                    Dim loaded = ExportGeometry.LoadBlocksFromFile(dlg.FileName)
-                    If loaded Is Nothing OrElse loaded.Count = 0 Then
-                        MessageBox.Show("Nessun blocco valido nel file.",
-                                        "Load Blocks", MessageBoxButtons.OK, MessageBoxIcon.Warning)
-                        Return
+                    Dim loaded = ExportGeometry.LoadBlocksFromFile(fn)
+                    If loaded IsNot Nothing Then
+                        totalRead += loaded.Count
+                        totalAdded += AddBlocksUnique(loaded)
                     End If
-
-                    If currentBlockSymbols Is Nothing Then currentBlockSymbols = New List(Of BlockDefinition)()
-                    currentBlockSymbols.AddRange(loaded)
-
-                    canvas.BlockSymbols = currentBlockSymbols
-                    cmbStyle.SelectedItem = CellRenderStyle.BlockSymbol.ToString()
-                    ApplyOptions()
-                    canvas.Invalidate()
-
-                    MessageBox.Show(loaded.Count & " blocco/i caricati (" & currentBlockSymbols.Count & " totali in memoria).",
-                                    "Load Blocks", MessageBoxButtons.OK, MessageBoxIcon.Information)
                 Catch ex As Exception
-                    MessageBox.Show("Errore caricamento blocchi:" & Environment.NewLine & ex.Message,
-                                    "Load Blocks", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                    errors.Add(IO.Path.GetFileName(fn) & ": " & ex.Message)
                 End Try
+            Next
+
+            If totalRead = 0 AndAlso errors.Count = 0 Then
+                MessageBox.Show("No valid blocks in the selected file(s).",
+                                "Load Blocks", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+                Return
             End If
+
+            canvas.BlockSymbols = currentBlockSymbols
+            cmbStyle.SelectedItem = CellRenderStyle.BlockSymbol.ToString()
+            ApplyOptions()
+            canvas.Invalidate()
+            RefreshBlockLibraryIfOpen()
+
+            Dim skipped As Integer = totalRead - totalAdded
+            Dim msg As String = totalAdded & " block(s) added (" & currentBlockSymbols.Count & " in memory)."
+            If skipped > 0 Then msg &= Environment.NewLine & skipped & " duplicate(s) skipped."
+            If errors.Count > 0 Then msg &= Environment.NewLine & "Errors:" & Environment.NewLine & String.Join(Environment.NewLine, errors)
+
+            MessageBox.Show(msg, "Load Blocks", MessageBoxButtons.OK, MessageBoxIcon.Information)
         End Using
     End Sub
+
+    ' Aggiunge a currentBlockSymbols solo i blocchi il cui Name non e' gia' presente
+    ' (confronto case-insensitive). I blocchi senza nome vengono sempre aggiunti.
+    ' Ritorna quanti ne ha effettivamente aggiunti.
+    Private Function AddBlocksUnique(incoming As List(Of BlockDefinition)) As Integer
+        Dim added As Integer = 0
+        If incoming Is Nothing Then Return 0
+        If currentBlockSymbols Is Nothing Then currentBlockSymbols = New List(Of BlockDefinition)()
+
+        Dim existing As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
+        For Each b In currentBlockSymbols
+            If b IsNot Nothing AndAlso Not String.IsNullOrEmpty(b.Name) Then existing.Add(b.Name)
+        Next
+
+        For Each b In incoming
+            If b Is Nothing Then Continue For
+            If Not String.IsNullOrEmpty(b.Name) AndAlso existing.Contains(b.Name) Then Continue For
+            currentBlockSymbols.Add(b)
+            If Not String.IsNullOrEmpty(b.Name) Then existing.Add(b.Name)
+            added += 1
+        Next
+        Return added
+    End Function
 
     Private Sub ClearBlocks_Click(sender As Object, e As EventArgs)
         If currentBlockSymbols Is Nothing OrElse currentBlockSymbols.Count = 0 Then
@@ -1118,6 +1168,45 @@ Public Class MainForm
 
         ApplyOptions()
         canvas.Invalidate()
+
+        RefreshBlockLibraryIfOpen()
+    End Sub
+
+    Private Sub OpenBlockLibrary_Click(sender As Object, e As EventArgs)
+        If blockLibForm Is Nothing OrElse blockLibForm.IsDisposed Then
+            blockLibForm = New BlockLibraryForm()
+            AddHandler blockLibForm.BlocksChanged, AddressOf BlockLibrary_BlocksChanged
+            blockLibForm.FillSymbols = chkFillSymbols.Checked
+            blockLibForm.SetBlocks(currentBlockSymbols)
+            blockLibForm.Show(Me)
+        Else
+            blockLibForm.FillSymbols = chkFillSymbols.Checked
+            blockLibForm.SetBlocks(currentBlockSymbols)
+            blockLibForm.BringToFront()
+            blockLibForm.Focus()
+        End If
+    End Sub
+
+    ' La galleria ha rimosso un blocco dalla lista condivisa: aggiorna il canvas.
+    Private Sub BlockLibrary_BlocksChanged(sender As Object, e As EventArgs)
+        canvas.BlockSymbols = currentBlockSymbols
+        If currentBlockSymbols.Count = 0 AndAlso cmbStyle.SelectedItem IsNot Nothing AndAlso
+           cmbStyle.SelectedItem.ToString() = CellRenderStyle.BlockSymbol.ToString() Then
+            cmbStyle.SelectedItem = CellRenderStyle.Curved.ToString()
+            ApplyOptions()
+        End If
+        canvas.Invalidate()
+    End Sub
+
+    Private Sub FillSymbols_RefreshLibrary(sender As Object, e As EventArgs)
+        RefreshBlockLibraryIfOpen()
+    End Sub
+
+    Private Sub RefreshBlockLibraryIfOpen()
+        If blockLibForm IsNot Nothing AndAlso Not blockLibForm.IsDisposed Then
+            blockLibForm.FillSymbols = chkFillSymbols.Checked
+            blockLibForm.SetBlocks(currentBlockSymbols)
+        End If
     End Sub
 
     Private Function ConvertToCanvasDomains(domains As List(Of SketchDomainRegion)) As List(Of CanvasSketchDomain)
@@ -1207,7 +1296,7 @@ Public Class MainForm
                     MessageBox.Show("No geometry to export.", "Solid Edge", MessageBoxButtons.OK, MessageBoxIcon.Information)
                     Return
                 End If
-                SolidEdgeExporter.ExportToActivePartSketch(geoms)
+                SolidEdgeExporter.ExportToActivePartSketch(geoms, currentBlockSymbols)
             Else
                 Dim paths = ExportGeometry.BuildExportPaths(canvas)
                 If paths Is Nothing OrElse paths.Count = 0 Then
@@ -1304,4 +1393,213 @@ Public Class MainForm
         End While
     End Sub
 
+End Class
+
+' ============================================================
+'  Galleria/anteprima dei blocchi in memoria (finestra modeless).
+'  Disegna una miniatura a tratto per ogni blocco (geometria gia'
+'  normalizzata) e consente di rimuovere il singolo blocco.
+' ============================================================
+Public Class BlockLibraryForm
+    Inherits Form
+
+    Public Event BlocksChanged As EventHandler
+
+    Private ReadOnly header As New Label()
+    Private ReadOnly flow As New FlowLayoutPanel()
+    Private blocks As List(Of BlockDefinition) = Nothing
+    Public Property FillSymbols As Boolean = False
+
+    Private Const ThumbPx As Integer = 120
+    Private ReadOnly accent As Color = Color.FromArgb(0, 188, 212)
+    Private ReadOnly bg As Color = Color.FromArgb(8, 6, 53)
+    Private ReadOnly tileBg As Color = Color.FromArgb(18, 16, 70)
+
+    Public Sub New()
+        Text = "Block Library"
+        Icon = My.Resources.SE_Voronoi_Blocks
+        StartPosition = FormStartPosition.CenterParent
+        Width = 720
+        Height = 560
+        MinimumSize = New Size(360, 320)
+        BackColor = bg
+        ForeColor = Color.White
+
+        header.Dock = DockStyle.Top
+        header.Height = 28
+        header.TextAlign = ContentAlignment.MiddleLeft
+        header.Padding = New Padding(8, 0, 0, 0)
+        header.ForeColor = Color.White
+        header.Text = "0 blocks in memory"
+
+        flow.Dock = DockStyle.Fill
+        flow.AutoScroll = True
+        flow.BackColor = bg
+        flow.Padding = New Padding(8)
+
+        Controls.Add(flow)
+        Controls.Add(header)
+    End Sub
+
+    Public Sub SetBlocks(list As List(Of BlockDefinition))
+        blocks = list
+        RebuildTiles()
+    End Sub
+
+    Private Sub RebuildTiles()
+        ' Rilascia le immagini precedenti.
+        For Each c As Control In flow.Controls
+            DisposeTile(c)
+        Next
+        flow.Controls.Clear()
+
+        Dim n As Integer = If(blocks Is Nothing, 0, blocks.Count)
+        header.Text = n & " block(s) in memory"
+
+        If blocks Is Nothing Then Return
+
+        For i As Integer = 0 To blocks.Count - 1
+            flow.Controls.Add(BuildTile(blocks(i)))
+        Next
+    End Sub
+
+    Private Sub DisposeTile(c As Control)
+        For Each child As Control In c.Controls
+            Dim pb = TryCast(child, PictureBox)
+            If pb IsNot Nothing AndAlso pb.Image IsNot Nothing Then
+                pb.Image.Dispose()
+                pb.Image = Nothing
+            End If
+        Next
+    End Sub
+
+    Private Function BuildTile(def As BlockDefinition) As Panel
+        Dim tile As New Panel()
+        tile.Width = ThumbPx + 16
+        tile.Height = ThumbPx + 52
+        tile.Margin = New Padding(6)
+        tile.BackColor = tileBg
+
+        Dim pic As New PictureBox()
+        pic.Width = ThumbPx
+        pic.Height = ThumbPx
+        pic.Left = 8
+        pic.Top = 6
+        pic.BackColor = bg
+        pic.SizeMode = PictureBoxSizeMode.Normal
+        pic.Image = RenderThumb(def, ThumbPx)
+        tile.Controls.Add(pic)
+
+        Dim lbl As New Label()
+        lbl.Text = If(String.IsNullOrEmpty(def.Name), "(no name)", def.Name)
+        lbl.AutoSize = False
+        lbl.Width = ThumbPx
+        lbl.Height = 16
+        lbl.Left = 8
+        lbl.Top = ThumbPx + 8
+        lbl.ForeColor = Color.White
+        lbl.TextAlign = ContentAlignment.MiddleCenter
+        lbl.AutoEllipsis = True
+        tile.Controls.Add(lbl)
+
+        Dim btnDel As New Button()
+        btnDel.Text = "Remove"
+        btnDel.Width = ThumbPx
+        btnDel.Height = 22
+        btnDel.Left = 8
+        btnDel.Top = ThumbPx + 26
+        btnDel.FlatStyle = FlatStyle.Flat
+        btnDel.BackColor = Color.White
+        btnDel.ForeColor = Color.FromArgb(30, 40, 55)
+        Dim target As BlockDefinition = def
+        AddHandler btnDel.Click, Sub(s, e) RemoveBlock(target)
+        tile.Controls.Add(btnDel)
+
+        Return tile
+    End Function
+
+    Private Sub RemoveBlock(def As BlockDefinition)
+        If blocks Is Nothing Then Return
+        blocks.Remove(def)
+        RebuildTiles()
+        RaiseEvent BlocksChanged(Me, EventArgs.Empty)
+    End Sub
+
+    Private Function RenderThumb(def As BlockDefinition, sz As Integer) As Bitmap
+        Dim bmp As New Bitmap(sz, sz)
+        Using g As Graphics = Graphics.FromImage(bmp)
+            g.SmoothingMode = SmoothingMode.AntiAlias
+            g.Clear(bg)
+
+            Dim polys = ExportGeometry.FlattenBlockPaths(def)
+            If polys Is Nothing OrElse polys.Count = 0 Then Return bmp
+
+            Dim minX As Double = Double.MaxValue, minY As Double = Double.MaxValue
+            Dim maxX As Double = Double.MinValue, maxY As Double = Double.MinValue
+            For Each poly In polys
+                For Each p In poly
+                    If p.X < minX Then minX = p.X
+                    If p.Y < minY Then minY = p.Y
+                    If p.X > maxX Then maxX = p.X
+                    If p.Y > maxY Then maxY = p.Y
+                Next
+            Next
+
+            Dim w As Double = maxX - minX
+            Dim h As Double = maxY - minY
+            If w <= 0.0000001 AndAlso h <= 0.0000001 Then Return bmp
+
+            Dim pad As Single = 12.0F
+            Dim scale As Double = (sz - 2 * pad) / Math.Max(Math.Max(w, h), 0.000001)
+            Dim cx As Double = (minX + maxX) * 0.5
+            Dim cy As Double = (minY + maxY) * 0.5
+
+            ' Riempimento (anelli chiusi, even-odd) coerente con "Fill symbols".
+            If FillSymbols Then
+                Dim loops = ExportGeometry.BuildFillLoops(def.Entities)
+                If loops IsNot Nothing AndAlso loops.Count > 0 Then
+                    Using gp As New GraphicsPath()
+                        gp.FillMode = FillMode.Alternate
+                        For Each lp In loops
+                            If lp.Count < 3 Then Continue For
+                            Dim fp(lp.Count - 1) As PointF
+                            For k As Integer = 0 To lp.Count - 1
+                                fp(k) = New PointF(
+                                    CSng(sz / 2.0 + (lp(k).X - cx) * scale),
+                                    CSng(sz / 2.0 + (lp(k).Y - cy) * scale))
+                            Next
+                            gp.AddPolygon(fp)
+                        Next
+                        Using br As New SolidBrush(Color.FromArgb(235, accent.R, accent.G, accent.B))
+                            g.FillPath(br, gp)
+                        End Using
+                    End Using
+                End If
+            End If
+
+            Using pen As New Pen(accent, 1.6F)
+                pen.LineJoin = LineJoin.Round
+                pen.StartCap = LineCap.Round
+                pen.EndCap = LineCap.Round
+                For Each poly In polys
+                    If poly.Count < 2 Then Continue For
+                    Dim pts(poly.Count - 1) As PointF
+                    For k As Integer = 0 To poly.Count - 1
+                        pts(k) = New PointF(
+                            CSng(sz / 2.0 + (poly(k).X - cx) * scale),
+                            CSng(sz / 2.0 + (poly(k).Y - cy) * scale))
+                    Next
+                    g.DrawLines(pen, pts)
+                Next
+            End Using
+        End Using
+        Return bmp
+    End Function
+
+    Protected Overrides Sub OnFormClosed(e As FormClosedEventArgs)
+        For Each c As Control In flow.Controls
+            DisposeTile(c)
+        Next
+        MyBase.OnFormClosed(e)
+    End Sub
 End Class

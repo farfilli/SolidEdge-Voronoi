@@ -121,4 +121,7 @@
   <data name="SE_Voronoi" type="System.Resources.ResXFileRef, System.Windows.Forms">
     <value>..\SE-Voronoi.ico;System.Drawing.Icon, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
   </data>
+  <data name="SE_Voronoi_Blocks" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\SE-Voronoi-Blocks.ico;System.Drawing.Icon, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
 </root>

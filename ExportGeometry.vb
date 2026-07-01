@@ -964,6 +964,70 @@ Public Module ExportGeometry
         Return New Vec2((p.X - cx) / maxR, (p.Y - cy) / maxR)
     End Function
 
+    ' Inverso esatto della normalizzazione: da geometria unitaria a geometria
+    ' NATIVA (mm, frame Y-in-basso), usando NativeCenter/NativeRadius del blocco.
+    ' Serve a ricreare la definizione del blocco dentro Solid Edge.
+    Public Function DenormalizeBlockPath(pth As ExportPath2D, def As BlockDefinition) As ExportPath2D
+        Dim res As New ExportPath2D()
+        If pth Is Nothing OrElse def Is Nothing Then Return res
+        res.Closed = pth.Closed
+
+        Dim R As Double = def.NativeRadius
+        Dim cx As Double = def.NativeCenter.X
+        Dim cy As Double = def.NativeCenter.Y
+
+        For Each seg In pth.Segments
+            If TypeOf seg Is ExportLine2D Then
+                Dim ln = DirectCast(seg, ExportLine2D)
+                res.Segments.Add(New ExportLine2D(DenP(ln.P1, cx, cy, R), DenP(ln.P2, cx, cy, R)))
+
+            ElseIf TypeOf seg Is ExportArc2D Then
+                Dim a = DirectCast(seg, ExportArc2D)
+                Dim na As New ExportArc2D(DenP(a.Center, cx, cy, R), a.Radius * R,
+                                          DenP(a.StartPoint, cx, cy, R), DenP(a.EndPoint, cx, cy, R),
+                                          a.Clockwise)
+                na.SweepDeg = a.SweepDeg
+                res.Segments.Add(na)
+
+            ElseIf TypeOf seg Is ExportCubicBezier2D Then
+                Dim bz = DirectCast(seg, ExportCubicBezier2D)
+                res.Segments.Add(New ExportCubicBezier2D(DenP(bz.P0, cx, cy, R), DenP(bz.C1, cx, cy, R),
+                                                         DenP(bz.C2, cx, cy, R), DenP(bz.P3, cx, cy, R)))
+
+            ElseIf TypeOf seg Is ExportEllipse2D Then
+                Dim el = DirectCast(seg, ExportEllipse2D)
+                res.Segments.Add(New ExportEllipse2D(DenP(el.Center, cx, cy, R),
+                                                     el.RadiusMajor * R, el.RadiusMinor * R,
+                                                     el.RotationRad, el.Orientation))
+
+            ElseIf TypeOf seg Is ExportCircle2D Then
+                Dim ci = DirectCast(seg, ExportCircle2D)
+                res.Segments.Add(New ExportCircle2D(DenP(ci.Center, cx, cy, R), ci.Radius * R))
+
+            ElseIf TypeOf seg Is ExportEllipticalArc2D Then
+                Dim ea = DirectCast(seg, ExportEllipticalArc2D)
+                res.Segments.Add(New ExportEllipticalArc2D(
+                    DenP(ea.Center, cx, cy, R),
+                    New Vec2(ea.MajorAxis.X * R, ea.MajorAxis.Y * R),
+                    New Vec2(ea.MinorAxis.X * R, ea.MinorAxis.Y * R),
+                    ea.StartAngle, ea.SweepAngle, ea.Orientation))
+
+            ElseIf TypeOf seg Is ExportBSpline2D Then
+                Dim bs = DirectCast(seg, ExportBSpline2D)
+                Dim nn As New List(Of Vec2)
+                For Each nd In bs.Nodes
+                    nn.Add(DenP(nd, cx, cy, R))
+                Next
+                res.Segments.Add(New ExportBSpline2D(nn, bs.ClosedCurve))
+            End If
+        Next
+        Return res
+    End Function
+
+    Private Function DenP(p As Vec2, cx As Double, cy As Double, R As Double) As Vec2
+        Return New Vec2(p.X * R + cx, p.Y * R + cy)
+    End Function
+
     Private Sub ApplyDefaultStyle(path As ExportPath2D, canvas As VoronoiCanvas, cellIndex As Integer)
         path.StrokeColor = GetExportColor(cellIndex)
         path.StrokeWidth = canvas.InnerCurveWidth
@@ -1421,15 +1485,37 @@ Public Module ExportGeometry
     ' spline chiusa) diventano subito un anello. Il risultato (in world) va poi
     ' riempito con regola even-odd, cosi' i profili interni diventano fori.
     Public Function BuildCellFillLoops(cg As CellGeometry) As List(Of List(Of Vec2))
+        If cg Is Nothing Then Return New List(Of List(Of Vec2))
+        Return BuildFillLoops(cg.StyledPaths)
+    End Function
+
+    ' Anelli chiusi di riempimento a partire da una lista di path (usato sia dalle
+    ' celle sia dall'anteprima dei blocchi).
+    Public Function BuildFillLoops(paths As List(Of ExportPath2D)) As List(Of List(Of Vec2))
+        Return BuildFillLoopsCore(If(paths, New List(Of ExportPath2D)))
+    End Function
+
+    ' Appiattisce ogni path di un blocco in una polilinea (per l'anteprima a tratto).
+    Public Function FlattenBlockPaths(def As BlockDefinition) As List(Of List(Of Vec2))
+        Dim res As New List(Of List(Of Vec2))
+        If def Is Nothing OrElse def.Entities Is Nothing Then Return res
+        For Each pth In def.Entities
+            Dim poly = FlattenStyledPath(pth)
+            If poly IsNot Nothing AndAlso poly.Count >= 2 Then res.Add(poly)
+        Next
+        Return res
+    End Function
+
+    Private Function BuildFillLoopsCore(styledPaths As List(Of ExportPath2D)) As List(Of List(Of Vec2))
         Dim loops As New List(Of List(Of Vec2))
-        If cg Is Nothing OrElse cg.StyledPaths Is Nothing OrElse cg.StyledPaths.Count = 0 Then Return loops
+        If styledPaths Is Nothing OrElse styledPaths.Count = 0 Then Return loops
 
         Dim flats As New List(Of List(Of Vec2))
         Dim closedHint As New List(Of Boolean)
         Dim minX As Double = Double.MaxValue, minY As Double = Double.MaxValue
         Dim maxX As Double = Double.MinValue, maxY As Double = Double.MinValue
 
-        For Each sp In cg.StyledPaths
+        For Each sp In styledPaths
             Dim poly = FlattenStyledPath(sp)
             If poly Is Nothing OrElse poly.Count < 2 Then Continue For
             flats.Add(poly)

@@ -159,6 +159,7 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="SE-Voronoi-Blocks.ico" />
     <Content Include="SE-Voronoi.ico" />
   </ItemGroup>
   <ItemGroup>
