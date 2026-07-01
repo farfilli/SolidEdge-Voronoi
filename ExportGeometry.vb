@@ -473,7 +473,8 @@ Public Module ExportGeometry
             key = canvas.SeedStyleKeys(cellIndex)
         End If
 
-        Return Math.Abs(key) Mod count
+        Dim baseIdx As Integer = Math.Abs(key) Mod count
+        Return PosMod(baseIdx + GetSymbolOffset(canvas, cellIndex), count)
     End Function
 
     ' Trasforma un'entita' di blocco (spazio locale ~raggio 1) nello spazio mondo:
@@ -1474,8 +1475,67 @@ Public Module ExportGeometry
     End Function
 
     Private Function GetEffectiveRenderStyle(canvas As VoronoiCanvas, cellIndex As Integer) As CellRenderStyle
-        If canvas.RenderStyle <> CellRenderStyle.Random Then Return canvas.RenderStyle
-        Return GetStableRandomSymbolStyle(canvas, cellIndex)
+        Dim baseStyle As CellRenderStyle = canvas.RenderStyle
+        Dim offset As Integer = GetSymbolOffset(canvas, cellIndex)
+
+        ' Straight/Curved: nessun simbolo da ciclare.
+        ' BlockSymbol: l'offset agisce sull'indice del blocco (GetStableBlockIndex),
+        ' non sullo stile, quindi qui si restituisce lo stile invariato.
+        If baseStyle = CellRenderStyle.Straight OrElse baseStyle = CellRenderStyle.Curved _
+           OrElse baseStyle = CellRenderStyle.BlockSymbol Then
+            Return baseStyle
+        End If
+
+        Dim styles = SymbolStylesArray()
+        If styles.Length = 0 Then Return baseStyle
+
+        Dim baseIdx As Integer
+        If baseStyle = CellRenderStyle.Random Then
+            baseIdx = Math.Abs(GetStyleKey(canvas, cellIndex)) Mod styles.Length
+        Else
+            baseIdx = Array.IndexOf(styles, baseStyle)
+            If baseIdx < 0 Then Return baseStyle
+        End If
+
+        Return styles(PosMod(baseIdx + offset, styles.Length))
+    End Function
+
+    Private Function SymbolStylesArray() As CellRenderStyle()
+        Return New CellRenderStyle() {
+            CellRenderStyle.Circle,
+            CellRenderStyle.Square,
+            CellRenderStyle.RoundedSquare,
+            CellRenderStyle.Triangle,
+            CellRenderStyle.Pentagon,
+            CellRenderStyle.Hexagon,
+            CellRenderStyle.Octagon,
+            CellRenderStyle.Star,
+            CellRenderStyle.Star3,
+            CellRenderStyle.Star4
+        }
+    End Function
+
+    Private Function GetStyleKey(canvas As VoronoiCanvas, cellIndex As Integer) As Integer
+        If canvas IsNot Nothing AndAlso canvas.SeedStyleKeys IsNot Nothing _
+           AndAlso cellIndex >= 0 AndAlso cellIndex < canvas.SeedStyleKeys.Count Then
+            Return canvas.SeedStyleKeys(cellIndex)
+        End If
+        Return cellIndex * 104729 + 17
+    End Function
+
+    Private Function GetSymbolOffset(canvas As VoronoiCanvas, cellIndex As Integer) As Integer
+        If canvas IsNot Nothing AndAlso canvas.CellSymbolOffsets IsNot Nothing _
+           AndAlso cellIndex >= 0 AndAlso cellIndex < canvas.CellSymbolOffsets.Count Then
+            Return canvas.CellSymbolOffsets(cellIndex)
+        End If
+        Return 0
+    End Function
+
+    Private Function PosMod(a As Integer, m As Integer) As Integer
+        If m <= 0 Then Return 0
+        Dim r As Integer = a Mod m
+        If r < 0 Then r += m
+        Return r
     End Function
 
     ' ===== Riempimento: costruzione degli anelli chiusi di una cella =====

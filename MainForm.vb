@@ -60,6 +60,7 @@ Public Class MainForm
     Private currentSeedStyleKeys As New List(Of Integer)
     Private currentSeedCellScales As New List(Of Single)
     Private currentSeedCellRotations As New List(Of Single)
+    Private currentSeedCellSymbolOffsets As New List(Of Integer)
     Private lastCellScale As Single = 0.82F
 
     Private currentSketchBoundaries As New List(Of List(Of Vec2))
@@ -109,7 +110,7 @@ Public Class MainForm
 
         AddHandler chkFill.CheckedChanged, AddressOf RefreshCanvasOptions
         AddHandler chkFillSymbols.CheckedChanged, AddressOf RefreshCanvasOptions
-        AddHandler chkFillSymbols.CheckedChanged, AddressOf FillSymbols_RefreshLibrary
+        AddHandler chkFillSymbols.CheckedChanged, AddressOf RefreshLibraryHandler
         AddHandler chkOuter.CheckedChanged, AddressOf RefreshCanvasOptions
         AddHandler chkSeeds.CheckedChanged, AddressOf RefreshCanvasOptions
         AddHandler chkInner.CheckedChanged, AddressOf RefreshCanvasOptions
@@ -122,10 +123,12 @@ Public Class MainForm
         AddHandler numInnerOffset.ValueChanged, AddressOf RefreshCanvasOptions
         AddHandler numVertexTrim.ValueChanged, AddressOf RefreshCanvasOptions
         AddHandler numCurveWidth.ValueChanged, AddressOf RefreshCanvasOptions
+        AddHandler numCurveWidth.ValueChanged, AddressOf RefreshLibraryHandler
 
         AddHandler canvas.SeedsEdited, AddressOf Canvas_SeedsEdited
         AddHandler canvas.SeedScalesEdited, AddressOf Canvas_SeedScalesEdited
         AddHandler canvas.SeedRotationsEdited, AddressOf Canvas_SeedRotationsEdited
+        AddHandler canvas.SeedSymbolOffsetsEdited, AddressOf Canvas_SeedSymbolOffsetsEdited
 
         AddHandler numCells.ValueChanged, AddressOf GenerationParameterChanged
         AddHandler numSeed.ValueChanged, AddressOf GenerationParameterChanged
@@ -465,6 +468,7 @@ Public Class MainForm
         RebuildSeedStyleKeys(currentSeeds.Count, CInt(numSeed.Value))
         RebuildSeedCellScales(currentSeeds.Count, CSng(numCellScale.Value))
         RebuildSeedCellRotations(currentSeeds.Count)
+        RebuildSeedCellSymbolOffsets(currentSeeds.Count)
         lastCellScale = CSng(numCellScale.Value)
 
         For i As Integer = 1 To CInt(numRelax.Value)
@@ -475,6 +479,7 @@ Public Class MainForm
         EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
         EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
         EnsureSeedCellRotationCount(currentSeeds.Count)
+        EnsureSeedCellSymbolOffsetCount(currentSeeds.Count)
 
         BuildFromCurrentSeeds()
     End Sub
@@ -560,6 +565,7 @@ Public Class MainForm
         Dim allStyleKeys As New List(Of Integer)
         Dim allScales As New List(Of Single)
         Dim allRotations As New List(Of Single)
+        Dim allOffsets As New List(Of Integer)
 
         If currentSketchDomains Is Nothing OrElse currentSketchDomains.Count = 0 Then Return
 
@@ -592,12 +598,14 @@ Public Class MainForm
             Dim regionStyleKeys As New List(Of Integer)
             Dim regionScales As New List(Of Single)
             Dim regionRotations As New List(Of Single)
+            Dim regionOffsets As New List(Of Integer)
             Dim rng As New Random(regionSeed Xor &H51F15E)
 
             For k As Integer = 0 To seeds.Count - 1
                 regionStyleKeys.Add(rng.Next())
                 regionScales.Add(defaultScale)
                 regionRotations.Add(0.0F)
+                regionOffsets.Add(0)
             Next
 
             For r As Integer = 1 To CInt(numRelax.Value)
@@ -608,6 +616,7 @@ Public Class MainForm
                 Dim filteredKeys As New List(Of Integer)
                 Dim filteredScales As New List(Of Single)
                 Dim filteredRotations As New List(Of Single)
+                Dim filteredOffsets As New List(Of Integer)
 
                 For k As Integer = 0 To seeds.Count - 1
                     If Geo2D.PointInPolygonWithHoles(seeds(k), d.Outer, d.Holes) Then
@@ -624,6 +633,10 @@ Public Class MainForm
                         If k < regionRotations.Count Then
                             filteredRotations.Add(regionRotations(k))
                         End If
+
+                        If k < regionOffsets.Count Then
+                            filteredOffsets.Add(regionOffsets(k))
+                        End If
                     End If
                 Next
 
@@ -631,6 +644,7 @@ Public Class MainForm
                 regionStyleKeys = filteredKeys
                 regionScales = filteredScales
                 regionRotations = filteredRotations
+                regionOffsets = filteredOffsets
             Next
 
             Dim cells = VoronoiEngine.BuildCells(seeds, d.Outer, d.Holes)
@@ -640,18 +654,21 @@ Public Class MainForm
             allStyleKeys.AddRange(regionStyleKeys)
             allScales.AddRange(regionScales)
             allRotations.AddRange(regionRotations)
+            allOffsets.AddRange(regionOffsets)
         Next
 
         currentSeeds = allSeeds
         currentSeedStyleKeys = allStyleKeys
         currentSeedCellScales = allScales
         currentSeedCellRotations = allRotations
+        currentSeedCellSymbolOffsets = allOffsets
 
         canvas.Cells = allCells
         canvas.EditableSeeds = New List(Of Vec2)(allSeeds)
         canvas.SeedStyleKeys = New List(Of Integer)(currentSeedStyleKeys)
         canvas.CellScales = New List(Of Single)(currentSeedCellScales)
         canvas.CellRotations = New List(Of Single)(currentSeedCellRotations)
+        canvas.CellSymbolOffsets = New List(Of Integer)(currentSeedCellSymbolOffsets)
 
         ApplyOptions()
         canvas.Invalidate()
@@ -667,10 +684,12 @@ Public Class MainForm
         currentSeeds = New List(Of Vec2)(canvas.EditableSeeds)
         currentSeedCellScales = New List(Of Single)(canvas.CellScales)
         currentSeedCellRotations = New List(Of Single)(canvas.CellRotations)
+        currentSeedCellSymbolOffsets = New List(Of Integer)(canvas.CellSymbolOffsets)
 
         EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
         EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
         EnsureSeedCellRotationCount(currentSeeds.Count)
+        EnsureSeedCellSymbolOffsetCount(currentSeeds.Count)
 
         BuildFromCurrentSeeds()
     End Sub
@@ -686,6 +705,13 @@ Public Class MainForm
         currentSeedCellRotations = New List(Of Single)(canvas.CellRotations)
         EnsureSeedCellRotationCount(currentSeeds.Count)
         canvas.CellRotations = New List(Of Single)(currentSeedCellRotations)
+        canvas.Invalidate()
+    End Sub
+
+    Private Sub Canvas_SeedSymbolOffsetsEdited(sender As Object, e As EventArgs)
+        currentSeedCellSymbolOffsets = New List(Of Integer)(canvas.CellSymbolOffsets)
+        EnsureSeedCellSymbolOffsetCount(currentSeeds.Count)
+        canvas.CellSymbolOffsets = New List(Of Integer)(currentSeedCellSymbolOffsets)
         canvas.Invalidate()
     End Sub
 
@@ -729,6 +755,7 @@ Public Class MainForm
         EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
         EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
         EnsureSeedCellRotationCount(currentSeeds.Count)
+        EnsureSeedCellSymbolOffsetCount(currentSeeds.Count)
 
         If useSketchDomains AndAlso lockSketchViewDomain Then
             canvas.Domain = currentWorldDomain
@@ -742,12 +769,14 @@ Public Class MainForm
             Dim allStyleKeys As New List(Of Integer)
             Dim allScales As New List(Of Single)
             Dim allRotations As New List(Of Single)
+            Dim allOffsets As New List(Of Integer)
 
             For Each d In currentSketchDomains
                 Dim seedsInDomain As New List(Of Vec2)
                 Dim keysInDomain As New List(Of Integer)
                 Dim scalesInDomain As New List(Of Single)
                 Dim rotationsInDomain As New List(Of Single)
+                Dim offsetsInDomain As New List(Of Integer)
 
                 For i As Integer = 0 To currentSeeds.Count - 1
                     If Geo2D.PointInPolygonWithHoles(currentSeeds(i), d.Outer, d.Holes) Then
@@ -768,6 +797,12 @@ Public Class MainForm
                         Else
                             rotationsInDomain.Add(0.0F)
                         End If
+
+                        If i < currentSeedCellSymbolOffsets.Count Then
+                            offsetsInDomain.Add(currentSeedCellSymbolOffsets(i))
+                        Else
+                            offsetsInDomain.Add(0)
+                        End If
                     End If
                 Next
 
@@ -779,6 +814,7 @@ Public Class MainForm
                 allStyleKeys.AddRange(keysInDomain)
                 allScales.AddRange(scalesInDomain)
                 allRotations.AddRange(rotationsInDomain)
+                allOffsets.AddRange(offsetsInDomain)
                 allCells.AddRange(cells)
             Next
 
@@ -786,6 +822,7 @@ Public Class MainForm
             currentSeedStyleKeys = allStyleKeys
             currentSeedCellScales = allScales
             currentSeedCellRotations = allRotations
+            currentSeedCellSymbolOffsets = allOffsets
 
             canvas.Cells = allCells
             canvas.EditableSeeds = New List(Of Vec2)(allSeeds)
@@ -798,10 +835,12 @@ Public Class MainForm
         EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
         EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
         EnsureSeedCellRotationCount(currentSeeds.Count)
+        EnsureSeedCellSymbolOffsetCount(currentSeeds.Count)
 
         canvas.SeedStyleKeys = New List(Of Integer)(currentSeedStyleKeys)
         canvas.CellScales = New List(Of Single)(currentSeedCellScales)
         canvas.CellRotations = New List(Of Single)(currentSeedCellRotations)
+        canvas.CellSymbolOffsets = New List(Of Integer)(currentSeedCellSymbolOffsets)
 
         ApplyOptions()
         canvas.Invalidate()
@@ -941,6 +980,8 @@ Public Class MainForm
             canvas.CellScales = New List(Of Single)()
             currentSeedCellRotations = New List(Of Single)()
             canvas.CellRotations = New List(Of Single)()
+            currentSeedCellSymbolOffsets = New List(Of Integer)()
+            canvas.CellSymbolOffsets = New List(Of Integer)()
 
             Dim holeFlags As New List(Of Boolean)
             Dim loopIndexMap As New Dictionary(Of Integer, SolidEdgeExporter.SketchBoundaryLoop)
@@ -1177,10 +1218,12 @@ Public Class MainForm
             blockLibForm = New BlockLibraryForm()
             AddHandler blockLibForm.BlocksChanged, AddressOf BlockLibrary_BlocksChanged
             blockLibForm.FillSymbols = chkFillSymbols.Checked
+            blockLibForm.StrokeWidth = CSng(numCurveWidth.Value)
             blockLibForm.SetBlocks(currentBlockSymbols)
             blockLibForm.Show(Me)
         Else
             blockLibForm.FillSymbols = chkFillSymbols.Checked
+            blockLibForm.StrokeWidth = CSng(numCurveWidth.Value)
             blockLibForm.SetBlocks(currentBlockSymbols)
             blockLibForm.BringToFront()
             blockLibForm.Focus()
@@ -1198,13 +1241,14 @@ Public Class MainForm
         canvas.Invalidate()
     End Sub
 
-    Private Sub FillSymbols_RefreshLibrary(sender As Object, e As EventArgs)
+    Private Sub RefreshLibraryHandler(sender As Object, e As EventArgs)
         RefreshBlockLibraryIfOpen()
     End Sub
 
     Private Sub RefreshBlockLibraryIfOpen()
         If blockLibForm IsNot Nothing AndAlso Not blockLibForm.IsDisposed Then
             blockLibForm.FillSymbols = chkFillSymbols.Checked
+            blockLibForm.StrokeWidth = CSng(numCurveWidth.Value)
             blockLibForm.SetBlocks(currentBlockSymbols)
         End If
     End Sub
@@ -1393,6 +1437,28 @@ Public Class MainForm
         End While
     End Sub
 
+    Private Sub RebuildSeedCellSymbolOffsets(count As Integer)
+        currentSeedCellSymbolOffsets = New List(Of Integer)(count)
+
+        For i As Integer = 0 To count - 1
+            currentSeedCellSymbolOffsets.Add(0)
+        Next
+    End Sub
+
+    Private Sub EnsureSeedCellSymbolOffsetCount(count As Integer)
+        If currentSeedCellSymbolOffsets Is Nothing Then
+            currentSeedCellSymbolOffsets = New List(Of Integer)()
+        End If
+
+        While currentSeedCellSymbolOffsets.Count < count
+            currentSeedCellSymbolOffsets.Add(0)
+        End While
+
+        While currentSeedCellSymbolOffsets.Count > count
+            currentSeedCellSymbolOffsets.RemoveAt(currentSeedCellSymbolOffsets.Count - 1)
+        End While
+    End Sub
+
 End Class
 
 ' ============================================================
@@ -1406,9 +1472,23 @@ Public Class BlockLibraryForm
     Public Event BlocksChanged As EventHandler
 
     Private ReadOnly header As New Label()
-    Private ReadOnly flow As New FlowLayoutPanel()
+    Private ReadOnly flow As New BufferedFlowLayoutPanel()
     Private blocks As List(Of BlockDefinition) = Nothing
     Public Property FillSymbols As Boolean = False
+    Public Property StrokeWidth As Single = 1.8F
+
+    Private Const WM_SETREDRAW As Integer = &HB
+    Private Declare Function SendMessage Lib "user32" Alias "SendMessageW" (hWnd As IntPtr, msg As Integer, wParam As IntPtr, lParam As IntPtr) As IntPtr
+
+    ' FlowLayoutPanel double-buffered: evita lo sfarfallio quando le tile vengono
+    ' ricostruite (es. cambio spessore linea o Fill symbols).
+    Private Class BufferedFlowLayoutPanel
+        Inherits FlowLayoutPanel
+        Public Sub New()
+            DoubleBuffered = True
+            SetStyle(ControlStyles.OptimizedDoubleBuffer Or ControlStyles.AllPaintingInWmPaint, True)
+        End Sub
+    End Class
 
     Private Const ThumbPx As Integer = 120
     Private ReadOnly accent As Color = Color.FromArgb(0, 188, 212)
@@ -1447,20 +1527,38 @@ Public Class BlockLibraryForm
     End Sub
 
     Private Sub RebuildTiles()
-        ' Rilascia le immagini precedenti.
-        For Each c As Control In flow.Controls
-            DisposeTile(c)
-        Next
-        flow.Controls.Clear()
+        Dim frozen As Boolean = False
+        Try
+            If flow.IsHandleCreated Then
+                SendMessage(flow.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero)
+                frozen = True
+            End If
+            flow.SuspendLayout()
 
-        Dim n As Integer = If(blocks Is Nothing, 0, blocks.Count)
-        header.Text = n & " block(s) in memory"
+            ' Rilascia le immagini precedenti.
+            For Each c As Control In flow.Controls
+                DisposeTile(c)
+            Next
+            flow.Controls.Clear()
 
-        If blocks Is Nothing Then Return
+            Dim n As Integer = If(blocks Is Nothing, 0, blocks.Count)
+            header.Text = n & " block(s) in memory"
 
-        For i As Integer = 0 To blocks.Count - 1
-            flow.Controls.Add(BuildTile(blocks(i)))
-        Next
+            If blocks IsNot Nothing Then
+                For i As Integer = 0 To blocks.Count - 1
+                    flow.Controls.Add(BuildTile(blocks(i)))
+                Next
+            End If
+
+        Finally
+            ' True: riesegue il layout del FlowLayoutPanel (riposiziona TUTTE le tile).
+            flow.ResumeLayout(True)
+            If frozen Then
+                ' Riabilita il ridisegno e ridipinge UNA sola volta il pannello completo.
+                SendMessage(flow.Handle, WM_SETREDRAW, New IntPtr(1), IntPtr.Zero)
+                flow.Invalidate(True)
+            End If
+        End Try
     End Sub
 
     Private Sub DisposeTile(c As Control)
@@ -1577,7 +1675,7 @@ Public Class BlockLibraryForm
                 End If
             End If
 
-            Using pen As New Pen(accent, 1.6F)
+            Using pen As New Pen(accent, Math.Max(0.5F, StrokeWidth))
                 pen.LineJoin = LineJoin.Round
                 pen.StartCap = LineCap.Round
                 pen.EndCap = LineCap.Round

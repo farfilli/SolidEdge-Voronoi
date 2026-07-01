@@ -113,6 +113,10 @@ Public Class VoronoiCanvas
     Public Property CellRotations As List(Of Single) = New List(Of Single)
     Public Property MouseWheelRotateStepDeg As Single = 5.0F
 
+    ' Offset per-cella del simbolo/blocco (CTRL + rotella): cicla tra i simboli/blocchi.
+    Public Property CellSymbolOffsets As List(Of Integer) = New List(Of Integer)
+    Public Event SeedSymbolOffsetsEdited As EventHandler
+
 
 
 
@@ -207,6 +211,7 @@ Public Class VoronoiCanvas
 
         EnsureCellScaleCount(Cells.Count)
         EnsureCellRotationCount(Cells.Count)
+        EnsureCellSymbolOffsetCount(Cells.Count)
 
         ' Geometria stilizzata dalla fonte UNICA (world-space): stesso
         ' risultato che useranno gli exporter.
@@ -564,6 +569,20 @@ Public Class VoronoiCanvas
         End While
     End Sub
 
+    Private Sub EnsureCellSymbolOffsetCount(requiredCount As Integer)
+        If CellSymbolOffsets Is Nothing Then
+            CellSymbolOffsets = New List(Of Integer)()
+        End If
+
+        While CellSymbolOffsets.Count < requiredCount
+            CellSymbolOffsets.Add(0)
+        End While
+
+        While CellSymbolOffsets.Count > requiredCount
+            CellSymbolOffsets.RemoveAt(CellSymbolOffsets.Count - 1)
+        End While
+    End Sub
+
     Private Function IsSymbolStyle(style As CellRenderStyle) As Boolean
         Return style <> CellRenderStyle.Straight AndAlso style <> CellRenderStyle.Curved
     End Function
@@ -834,6 +853,17 @@ Public Class VoronoiCanvas
 
         Dim wheelSteps As Single = CSng(e.Delta) / 120.0F
         If Math.Abs(wheelSteps) < 0.001F Then Return
+
+        If (ModifierKeys And Keys.Control) = Keys.Control Then
+            ' CTRL + rotella: cambia SOLO questa cella con il simbolo/blocco
+            ' successivo (o precedente) in sequenza. Persistente come scala/rotazione.
+            EnsureCellSymbolOffsetCount(EditableSeeds.Count)
+            Dim stepN As Integer = If(wheelSteps > 0, 1, -1)
+            CellSymbolOffsets(idx) = CellSymbolOffsets(idx) + stepN
+            RaiseEvent SeedSymbolOffsetsEdited(Me, EventArgs.Empty)
+            Invalidate()
+            Return
+        End If
 
         If (ModifierKeys And Keys.Shift) = Keys.Shift Then
             ' SHIFT + rotella: ruota il simbolo della cella (offset additivo).
