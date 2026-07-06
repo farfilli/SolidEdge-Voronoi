@@ -2190,6 +2190,7 @@ Public Class ThemedSlider
 
     Protected Overrides Sub OnPaint(e As PaintEventArgs)
         e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+        e.Graphics.PixelOffsetMode = Drawing2D.PixelOffsetMode.HighQuality
         e.Graphics.Clear(BackColor)
 
         Dim trackL As Integer = PadX
@@ -2357,6 +2358,7 @@ Public Class ThemedButton
 
     Protected Overrides Sub OnPaint(e As PaintEventArgs)
         e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+        e.Graphics.PixelOffsetMode = Drawing2D.PixelOffsetMode.HighQuality
 
         ' Sfondo del contenitore dietro gli angoli arrotondati.
         Dim parentBg As Color = If(Parent IsNot Nothing, Parent.BackColor, UiTheme.BgSidebar)
@@ -2424,6 +2426,7 @@ Public Class ThemedCheckBox
 
     Protected Overrides Sub OnPaint(e As PaintEventArgs)
         e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+        e.Graphics.PixelOffsetMode = Drawing2D.PixelOffsetMode.HighQuality
         e.Graphics.Clear(BackColor)
 
         Dim boxSize As Single = 15.0F
@@ -2661,6 +2664,7 @@ Public Class ThemedNumericUpDown
 
     Protected Overrides Sub OnPaint(e As PaintEventArgs)
         e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+        e.Graphics.PixelOffsetMode = Drawing2D.PixelOffsetMode.HighQuality
 
         Dim parentBg As Color = If(Parent IsNot Nothing, Parent.BackColor, UiTheme.BgSidebar)
         e.Graphics.Clear(parentBg)
@@ -2894,6 +2898,7 @@ Public Class ThemedComboBox
 
     Protected Overrides Sub OnPaint(e As PaintEventArgs)
         e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+        e.Graphics.PixelOffsetMode = Drawing2D.PixelOffsetMode.HighQuality
 
         Dim parentBg As Color = If(Parent IsNot Nothing, Parent.BackColor, UiTheme.BgSidebar)
         e.Graphics.Clear(parentBg)
@@ -3065,6 +3070,7 @@ Public Class ThemedVScrollBar
 
     Protected Overrides Sub OnPaint(e As PaintEventArgs)
         e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+        e.Graphics.PixelOffsetMode = Drawing2D.PixelOffsetMode.HighQuality
         e.Graphics.Clear(BackColor)
 
         Dim tr = ThumbRect()
