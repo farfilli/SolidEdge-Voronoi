@@ -20,13 +20,26 @@ Public Class MainForm
     Private ReadOnly numRelax As New NumericUpDown()
 
     Private ReadOnly cmbStyle As New ComboBox()
+    Private ReadOnly cmbSeedMode As New ComboBox()
     Private ReadOnly cmbVertexMode As New ComboBox()
 
-    Private ReadOnly numCellScale As New NumericUpDown()
+    Private ReadOnly numCellScale As New ThemedSlider()
 
-    Private ReadOnly numInnerOffset As New NumericUpDown()
-    Private ReadOnly numVertexTrim As New NumericUpDown()
-    Private ReadOnly numCurveWidth As New NumericUpDown()
+    Private ReadOnly numInnerOffset As New ThemedSlider()
+    Private ReadOnly numVertexTrim As New ThemedSlider()
+    Private ReadOnly numCurveWidth As New ThemedSlider()
+
+    ' Sezione della sidebar in costruzione (target degli helper AddRow*)
+    Private curSection As CollapsibleSection = Nothing
+
+    ' Status bar
+    Private ReadOnly statusBar As New Panel()
+    Private ReadOnly lblStatusInfo As New Label()
+    Private ReadOnly lblStatusCoords As New Label()
+    Private ReadOnly lblStatusReady As New Label()
+    Private ReadOnly lblStatusDot As New Label()
+
+    Private ReadOnly tips As New ToolTip()
 
     Private ReadOnly chkFill As New CheckBox()
     Private ReadOnly chkFillSymbols As New CheckBox()
@@ -83,17 +96,26 @@ Public Class MainForm
         MinimumSize = New Size(1200, 760)
 
         Icon = My.Resources.SE_Voronoi
+        Font = New Font("Segoe UI", 9.0F)
+        BackColor = UiTheme.BgCanvas
 
         ConfigureControls()
         BuildSidebar()
+        BuildStatusBar()
 
         canvas.Dock = DockStyle.Fill
         currentWorldDomain = domain
         canvas.Domain = currentWorldDomain
-        canvas.BackColor = Color.FromArgb(8, 6, 53)
+        canvas.BackColor = UiTheme.BgCanvas
 
         Controls.Add(canvas)
         Controls.Add(sidebar)
+        Controls.Add(statusBar)
+
+        ApplyDarkTheme()
+        SetupTooltips()
+
+        AddHandler canvas.WorldCursorMoved, AddressOf Canvas_WorldCursorMoved
 
         AddHandler btnGenerate.Click, AddressOf GenerateRandomDiagram
         AddHandler btnShuffle.Click, AddressOf ShuffleSeed
@@ -133,6 +155,7 @@ Public Class MainForm
         AddHandler numCells.ValueChanged, AddressOf GenerationParameterChanged
         AddHandler numSeed.ValueChanged, AddressOf GenerationParameterChanged
         AddHandler numRelax.ValueChanged, AddressOf GenerationParameterChanged
+        AddHandler cmbSeedMode.SelectedIndexChanged, AddressOf GenerationParameterChanged
 
         GenerateRandomDiagram(Nothing, EventArgs.Empty)
     End Sub
@@ -140,14 +163,14 @@ Public Class MainForm
     Private Sub BuildSidebar()
         sidebar.Dock = DockStyle.Left
         sidebar.Width = 280
-        sidebar.BackColor = Color.FromArgb(245, 247, 250)
-        sidebar.Padding = New Padding(6)
+        sidebar.BackColor = UiTheme.BgSidebar
+        sidebar.Padding = New Padding(10, 6, 6, 6)
 
         sideLayout.Dock = DockStyle.Fill
         sideLayout.AutoScroll = True
         sideLayout.ColumnCount = 1
         sideLayout.RowCount = 0
-        sideLayout.BackColor = sidebar.BackColor
+        sideLayout.BackColor = UiTheme.BgSidebar
         sideLayout.AutoSize = True
         sideLayout.GrowStyle = TableLayoutPanelGrowStyle.AddRows
         sideLayout.Padding = New Padding(0)
@@ -155,32 +178,51 @@ Public Class MainForm
 
         sidebar.Controls.Add(sideLayout)
 
-        AddRowTitle("Cell Style")
-        AddRowControl(cmbStyle)
+        ' Titolo app
+        Dim appTitle As New Label With {
+            .Text = "SE-VORONOI",
+            .ForeColor = UiTheme.Accent,
+            .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
+            .AutoSize = False,
+            .Width = 246,
+            .Height = 26,
+            .Margin = New Padding(3, 4, 3, 2),
+            .TextAlign = ContentAlignment.MiddleLeft
+        }
+        sideLayout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+        sideLayout.Controls.Add(appTitle)
 
-        AddDoubleRow("Modalità vertice", cmbVertexMode,
-             "Dimensione vertice", numVertexTrim)
-
+        ' ===== GENERATION =====
+        curSection = NewSection("GENERATION", True)
+        AddRowTitle("Seed Placement")
+        AddRowControl(cmbSeedMode)
         AddDoubleRow("Cell Count", numCells,
              "Random Seed", numSeed)
-
         AddDoubleRow("Relax", numRelax,
              "Cell Scale", numCellScale)
+        AddDoubleRow("", btnGenerate,
+             "", btnShuffle, 32)
 
+        ' ===== STYLE =====
+        curSection = NewSection("STYLE", True)
+        AddRowTitle("Cell Style")
+        AddRowControl(cmbStyle)
+        AddDoubleRow("Modalità vertice", cmbVertexMode,
+             "Dimensione vertice", numVertexTrim)
         AddDoubleRow("Inner Offset", numInnerOffset,
              "Curve Width", numCurveWidth)
+        AddRowControl(chkFill, 22)
+        AddRowControl(chkFillSymbols, 22)
+        AddRowControl(chkRandomRotation, 22)
 
-        AddRowControl(chkFill)
-        AddRowControl(chkFillSymbols)
-        AddRowControl(chkOuter)
-        AddRowControl(chkSeeds)
-        AddRowControl(chkInner)
-        AddRowControl(chkRandomRotation)
+        ' ===== DISPLAY =====
+        curSection = NewSection("DISPLAY", False)
+        AddRowControl(chkOuter, 22)
+        AddRowControl(chkSeeds, 22)
+        AddRowControl(chkInner, 22)
 
-        AddRowControl(btnGenerate, 34)
-        AddRowControl(btnShuffle, 34)
-
-        AddRowTitle("Sketch")
+        ' ===== SKETCH & BLOCKS =====
+        curSection = NewSection("SKETCH & BLOCKS", True)
         AddRowControl(btnReadSketchProfile, 30)
         AddRowControl(btnReadBlockDefaultView, 30)
         AddRowControl(btnLoadBlocks, 30)
@@ -188,33 +230,223 @@ Public Class MainForm
         AddRowControl(btnClearBlocks, 30)
         AddRowControl(btnBlockLibrary, 30)
 
-        AddRowTitle("Export")
+        ' ===== EXPORT =====
+        curSection = NewSection("EXPORT", True)
         AddRowControl(btnExportSvg, 30)
         AddRowControl(btnExportDxf, 30)
-        AddRowControl(chkExportAsBlocks)
-        AddRowControl(btnToSolidEdge, 30)
+        AddRowControl(chkExportAsBlocks, 22)
+        AddRowControl(btnToSolidEdge, 32)
+    End Sub
+
+    Private Function NewSection(title As String, startOpen As Boolean) As CollapsibleSection
+        Dim sec As New CollapsibleSection(title, startOpen)
+        sideLayout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+        sideLayout.Controls.Add(sec)
+        Return sec
+    End Function
+
+    ' ===== Tema scuro =====
+
+    Private Sub ApplyDarkTheme()
+        StyleButton(btnGenerate, True)
+        StyleButton(btnToSolidEdge, True)
+        StyleButton(btnShuffle, False)
+        StyleButton(btnReadSketchProfile, False)
+        StyleButton(btnReadBlockDefaultView, False)
+        StyleButton(btnLoadBlocks, False)
+        StyleButton(btnSaveBlocks, False)
+        StyleButton(btnClearBlocks, False)
+        StyleButton(btnBlockLibrary, False)
+        StyleButton(btnExportSvg, False)
+        StyleButton(btnExportDxf, False)
+
+        For Each chk In New CheckBox() {chkFill, chkFillSymbols, chkOuter, chkSeeds, chkInner, chkRandomRotation, chkExportAsBlocks}
+            chk.ForeColor = UiTheme.Txt
+            chk.BackColor = UiTheme.BgSidebar
+        Next
+
+        StyleCombo(cmbStyle)
+        StyleCombo(cmbSeedMode)
+        StyleCombo(cmbVertexMode)
+
+        For Each num In New NumericUpDown() {numCells, numSeed, numRelax}
+            num.BackColor = UiTheme.BgField
+            num.ForeColor = UiTheme.Txt
+            num.BorderStyle = BorderStyle.FixedSingle
+        Next
+    End Sub
+
+    Private Sub StyleButton(btn As Button, primary As Boolean)
+        btn.FlatStyle = FlatStyle.Flat
+        btn.UseVisualStyleBackColor = False
+        btn.Cursor = Cursors.Hand
+        If primary Then
+            btn.BackColor = UiTheme.Accent
+            btn.ForeColor = UiTheme.BgCanvas
+            btn.Font = New Font("Segoe UI", 9.0F, FontStyle.Bold)
+            btn.FlatAppearance.BorderSize = 0
+            btn.FlatAppearance.MouseOverBackColor = UiTheme.AccentHi
+            btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(0, 150, 170)
+        Else
+            btn.BackColor = UiTheme.BgField
+            btn.ForeColor = UiTheme.Txt
+            btn.FlatAppearance.BorderColor = UiTheme.Border
+            btn.FlatAppearance.BorderSize = 1
+            btn.FlatAppearance.MouseOverBackColor = UiTheme.BgFieldHi
+            btn.FlatAppearance.MouseDownBackColor = UiTheme.Border
+        End If
+    End Sub
+
+    Private Sub StyleCombo(cmb As ComboBox)
+        cmb.FlatStyle = FlatStyle.Flat
+        cmb.BackColor = UiTheme.BgField
+        cmb.ForeColor = UiTheme.Txt
+        cmb.DrawMode = DrawMode.OwnerDrawFixed
+        cmb.ItemHeight = 17
+        AddHandler cmb.DrawItem, AddressOf Combo_DrawItem
+    End Sub
+
+    Private Sub Combo_DrawItem(sender As Object, e As DrawItemEventArgs)
+        If e.Index < 0 Then Return
+        Dim cmb = DirectCast(sender, ComboBox)
+        Dim selected As Boolean = (e.State And DrawItemState.Selected) = DrawItemState.Selected
+
+        Using b As New SolidBrush(If(selected, UiTheme.BgFieldHi, UiTheme.BgField))
+            e.Graphics.FillRectangle(b, e.Bounds)
+        End Using
+        Using tb As New SolidBrush(UiTheme.Txt)
+            e.Graphics.DrawString(cmb.Items(e.Index).ToString(), cmb.Font, tb,
+                                  e.Bounds.X + 4, e.Bounds.Y + 1)
+        End Using
+        If selected Then e.DrawFocusRectangle()
+    End Sub
+
+    ' ===== Status bar =====
+
+    Private Sub BuildStatusBar()
+        statusBar.Dock = DockStyle.Bottom
+        statusBar.Height = 28
+        statusBar.BackColor = UiTheme.StatusBg
+
+        lblStatusInfo.AutoSize = True
+        lblStatusInfo.ForeColor = UiTheme.Txt
+        lblStatusInfo.Font = New Font("Segoe UI", 8.5F)
+        lblStatusInfo.Location = New Point(12, 6)
+        lblStatusInfo.Text = ""
+
+        lblStatusCoords.AutoSize = True
+        lblStatusCoords.ForeColor = UiTheme.TxtDim
+        lblStatusCoords.Font = New Font("Segoe UI", 8.5F)
+        lblStatusCoords.Location = New Point(560, 6)
+        lblStatusCoords.Text = ""
+
+        lblStatusReady.AutoSize = True
+        lblStatusReady.ForeColor = UiTheme.Txt
+        lblStatusReady.Font = New Font("Segoe UI", 8.5F)
+        lblStatusReady.Text = "Ready"
+
+        lblStatusDot.AutoSize = True
+        lblStatusDot.ForeColor = Color.FromArgb(0, 200, 83)
+        lblStatusDot.Font = New Font("Segoe UI", 8.5F)
+        lblStatusDot.Text = ChrW(&H25CF)
+
+        statusBar.Controls.Add(lblStatusInfo)
+        statusBar.Controls.Add(lblStatusCoords)
+        statusBar.Controls.Add(lblStatusDot)
+        statusBar.Controls.Add(lblStatusReady)
+
+        AddHandler statusBar.Resize, Sub()
+                                         lblStatusReady.Location = New Point(statusBar.Width - lblStatusReady.Width - 14, 6)
+                                         lblStatusDot.Location = New Point(lblStatusReady.Left - lblStatusDot.Width - 2, 6)
+                                         lblStatusCoords.Location = New Point(Math.Max(560, statusBar.Width - 420), 6)
+                                     End Sub
+    End Sub
+
+    Private Sub UpdateStatusBar()
+        Dim cellCount As Integer = If(canvas.Cells Is Nothing, 0, canvas.Cells.Count)
+        Dim seedCount As Integer = If(currentSeeds Is Nothing, 0, currentSeeds.Count)
+        Dim blockCount As Integer = If(currentBlockSymbols Is Nothing, 0, currentBlockSymbols.Count)
+
+        Dim domainTxt As String
+        If useSketchDomains AndAlso currentSketchDomains IsNot Nothing AndAlso currentSketchDomains.Count > 0 Then
+            domainTxt = "Sketch (" & currentSketchDomains.Count & " region/s)"
+        Else
+            domainTxt = "Rect " & CInt(domain.Width) & " × " & CInt(domain.Height)
+        End If
+
+        Dim sep As String = "   " & ChrW(&H2502) & "   "
+        lblStatusInfo.Text = "Cells: " & cellCount & sep &
+                             "Seeds: " & seedCount & sep &
+                             "Domain: " & domainTxt & sep &
+                             "Blocks in memory: " & blockCount
+    End Sub
+
+    Private Sub Canvas_WorldCursorMoved(sender As Object, e As EventArgs)
+        lblStatusCoords.Text = "X: " & canvas.LastWorldCursorX.ToString("0.0") &
+                               "   Y: " & canvas.LastWorldCursorY.ToString("0.0")
+    End Sub
+
+    ' ===== Tooltips =====
+
+    Private Sub SetupTooltips()
+        tips.AutoPopDelay = 8000
+        tips.InitialDelay = 500
+        tips.SetToolTip(numRelax, "Iterazioni di rilassamento (Lloyd): uniforma le dimensioni delle celle")
+        tips.SetToolTip(cmbSeedMode, "Distribuzione dei semi nel dominio")
+        tips.SetToolTip(numInnerOffset, "Distanza della curva interna dal bordo cella")
+        tips.SetToolTip(numCellScale, "Scala globale dei simboli (rotella sul canvas per la singola cella)")
+        tips.SetToolTip(canvas, "Rotella: scala simbolo" & ChrW(10) &
+                                "Shift+Rotella: ruota simbolo" & ChrW(10) &
+                                "CTRL+Rotella: cambia simbolo/blocco" & ChrW(10) &
+                                "Doppio clic: aggiungi seme  -  Clic destro: rimuovi seme")
+    End Sub
+
+    ' ===== Chrome scuro (titolo finestra + scrollbar) =====
+
+    <Runtime.InteropServices.DllImport("dwmapi.dll")>
+    Private Shared Function DwmSetWindowAttribute(hwnd As IntPtr, attr As Integer, ByRef attrValue As Integer, attrSize As Integer) As Integer
+    End Function
+
+    <Runtime.InteropServices.DllImport("uxtheme.dll", CharSet:=Runtime.InteropServices.CharSet.Unicode)>
+    Private Shared Function SetWindowTheme(hWnd As IntPtr, pszSubAppName As String, pszSubIdList As String) As Integer
+    End Function
+
+    Protected Overrides Sub OnLoad(e As EventArgs)
+        MyBase.OnLoad(e)
+        Try
+            ' Barra del titolo scura (Windows 10 1809+ / 11); attr 20, fallback 19.
+            Dim dark As Integer = 1
+            If DwmSetWindowAttribute(Handle, 20, dark, 4) <> 0 Then
+                DwmSetWindowAttribute(Handle, 19, dark, 4)
+            End If
+            ' Scrollbar scure sul pannello scorrevole della sidebar.
+            SetWindowTheme(sideLayout.Handle, "DarkMode_Explorer", Nothing)
+        Catch
+            ' Sistemi senza supporto: si ignora, resta il chrome standard.
+        End Try
     End Sub
 
     Private Sub AddRowTitle(text As String)
-        sideLayout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+        curSection.Content.RowStyles.Add(New RowStyle(SizeType.AutoSize))
         Dim lbl As New Label With {
             .Text = text,
-            .ForeColor = Color.FromArgb(30, 40, 55),
+            .ForeColor = UiTheme.TxtDim,
+            .Font = New Font("Segoe UI", 7.5F),
             .AutoSize = False,
-            .Height = 18,
+            .Height = 16,
             .Width = 235,
-            .Margin = New Padding(3, 4, 3, 1),
+            .Margin = New Padding(3, 4, 3, 0),
             .TextAlign = ContentAlignment.BottomLeft
         }
-        sideLayout.Controls.Add(lbl)
+        curSection.Content.Controls.Add(lbl)
     End Sub
 
     Private Sub AddRowControl(ctrl As Control, Optional forcedHeight As Integer = 28)
-        sideLayout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+        curSection.Content.RowStyles.Add(New RowStyle(SizeType.AutoSize))
         ctrl.Width = 235
         ctrl.Height = forcedHeight
-        ctrl.Margin = New Padding(3, 0, 3, 3)
-        sideLayout.Controls.Add(ctrl)
+        ctrl.Margin = New Padding(3, 1, 3, 3)
+        curSection.Content.Controls.Add(ctrl)
     End Sub
 
 
@@ -224,7 +456,7 @@ Public Class MainForm
                          rightCtrl As Control,
                          Optional controlHeight As Integer = 28)
 
-        sideLayout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
+        curSection.Content.RowStyles.Add(New RowStyle(SizeType.AutoSize))
 
         Dim host As New TableLayoutPanel With {
         .ColumnCount = 2,
@@ -244,7 +476,7 @@ Public Class MainForm
         host.Controls.Add(leftPanel, 0, 0)
         host.Controls.Add(rightPanel, 1, 0)
 
-        sideLayout.Controls.Add(host)
+        curSection.Content.Controls.Add(host)
     End Sub
 
     Private Function BuildLabeledControlPanel(title As String,
@@ -265,11 +497,12 @@ Public Class MainForm
 
         Dim lbl As New Label With {
         .Text = title,
-        .ForeColor = Color.FromArgb(30, 40, 55),
+        .ForeColor = UiTheme.TxtDim,
+        .Font = New Font("Segoe UI", 7.5F),
         .AutoSize = False,
-        .Height = 18,
+        .Height = 16,
         .Dock = DockStyle.Top,
-        .Margin = New Padding(0, 4, 4, 1),
+        .Margin = New Padding(0, 4, 4, 0),
         .TextAlign = ContentAlignment.BottomLeft
     }
 
@@ -287,6 +520,10 @@ Public Class MainForm
         cmbStyle.DropDownStyle = ComboBoxStyle.DropDownList
         cmbStyle.Items.AddRange([Enum].GetNames(GetType(CellRenderStyle)))
         cmbStyle.SelectedItem = CellRenderStyle.Curved.ToString()
+
+        cmbSeedMode.DropDownStyle = ComboBoxStyle.DropDownList
+        cmbSeedMode.Items.AddRange([Enum].GetNames(GetType(SeedPlacementMode)))
+        cmbSeedMode.SelectedItem = SeedPlacementMode.Random.ToString()
 
         cmbVertexMode.DropDownStyle = ComboBoxStyle.DropDownList
         cmbVertexMode.Items.AddRange(New String() {"Spigolo vivo", "Raggiatura con arco", "Curva spline"})
@@ -464,7 +701,7 @@ Public Class MainForm
             Return
         End If
 
-        currentSeeds = VoronoiEngine.CreateSeeds(CInt(numCells.Value), domain, CInt(numSeed.Value))
+        currentSeeds = VoronoiEngine.CreateSeedsByMode(GetSeedMode(), CInt(numCells.Value), domain, CInt(numSeed.Value))
         RebuildSeedStyleKeys(currentSeeds.Count, CInt(numSeed.Value))
         RebuildSeedCellScales(currentSeeds.Count, CSng(numCellScale.Value))
         RebuildSeedCellRotations(currentSeeds.Count)
@@ -593,7 +830,7 @@ Public Class MainForm
             If quota = 0 Then Continue For
 
             Dim regionSeed As Integer = seedBase + i * 997
-            Dim seeds = VoronoiEngine.CreateSeeds(quota, d.Bounds, d.Outer, d.Holes, regionSeed)
+            Dim seeds = VoronoiEngine.CreateSeedsByModeInPolygon(GetSeedMode(), quota, d.Bounds, d.Outer, d.Holes, regionSeed)
 
             Dim regionStyleKeys As New List(Of Integer)
             Dim regionScales As New List(Of Single)
@@ -928,6 +1165,8 @@ Public Class MainForm
 
         ' "Fill symbols" ha senso solo dove c'e' un path interno (curva o simbolo).
         chkFillSymbols.Enabled = usesVertices OrElse isSymbol
+
+        UpdateStatusBar()
     End Sub
 
     Private Function VertexModeFromUi() As SymbolCornerStyle
@@ -1239,6 +1478,7 @@ Public Class MainForm
             ApplyOptions()
         End If
         canvas.Invalidate()
+        UpdateStatusBar()
     End Sub
 
     Private Sub RefreshLibraryHandler(sender As Object, e As EventArgs)
@@ -1388,6 +1628,13 @@ Public Class MainForm
     Private Sub GenerationParameterChanged(sender As Object, e As EventArgs)
         GenerateRandomDiagram(sender, e)
     End Sub
+
+    Private Function GetSeedMode() As SeedPlacementMode
+        If cmbSeedMode.SelectedItem Is Nothing Then Return SeedPlacementMode.Random
+        Dim v As SeedPlacementMode
+        If [Enum].TryParse(Of SeedPlacementMode)(cmbSeedMode.SelectedItem.ToString(), v) Then Return v
+        Return SeedPlacementMode.Random
+    End Function
 
     Private Sub RebuildSeedCellScales(count As Integer, defaultScale As Single)
         currentSeedCellScales = New List(Of Single)(count)
@@ -1699,5 +1946,305 @@ Public Class BlockLibraryForm
             DisposeTile(c)
         Next
         MyBase.OnFormClosed(e)
+    End Sub
+End Class
+
+
+' ============================================================
+'  Palette del tema scuro dell'applicazione.
+' ============================================================
+Public NotInheritable Class UiTheme
+    Private Sub New()
+    End Sub
+
+    Public Shared ReadOnly BgCanvas As Color = Color.FromArgb(8, 6, 53)
+    Public Shared ReadOnly BgSidebar As Color = Color.FromArgb(16, 14, 60)
+    Public Shared ReadOnly BgField As Color = Color.FromArgb(22, 20, 74)
+    Public Shared ReadOnly BgFieldHi As Color = Color.FromArgb(30, 28, 94)
+    Public Shared ReadOnly Border As Color = Color.FromArgb(42, 40, 112)
+    Public Shared ReadOnly Txt As Color = Color.FromArgb(232, 236, 248)
+    Public Shared ReadOnly TxtDim As Color = Color.FromArgb(154, 160, 200)
+    Public Shared ReadOnly Accent As Color = Color.FromArgb(0, 188, 212)
+    Public Shared ReadOnly AccentHi As Color = Color.FromArgb(110, 231, 243)
+    Public Shared ReadOnly StatusBg As Color = Color.FromArgb(13, 11, 69)
+End Class
+
+' ============================================================
+'  Slider a tema con etichetta del valore. Espone la stessa interfaccia
+'  di NumericUpDown (Minimum/Maximum/Value/Increment/DecimalPlaces,
+'  evento ValueChanged) cosi' puo' sostituirlo senza toccare i chiamanti.
+' ============================================================
+Public Class ThemedSlider
+    Inherits Control
+
+    Private _min As Decimal = 0D
+    Private _max As Decimal = 100D
+    Private _val As Decimal = 0D
+    Private _inc As Decimal = 1D
+    Private _decimals As Integer = 0
+    Private dragging As Boolean = False
+    Private hovering As Boolean = False
+
+    Private Const ValueTextW As Integer = 40
+    Private Const PadX As Integer = 8
+
+    Public Event ValueChanged As EventHandler
+
+    Public Sub New()
+        SetStyle(ControlStyles.UserPaint Or
+                 ControlStyles.AllPaintingInWmPaint Or
+                 ControlStyles.OptimizedDoubleBuffer Or
+                 ControlStyles.ResizeRedraw Or
+                 ControlStyles.Selectable, True)
+        Height = 26
+        Cursor = Cursors.Hand
+        BackColor = UiTheme.BgSidebar
+        ForeColor = UiTheme.Txt
+    End Sub
+
+    Public Property Minimum As Decimal
+        Get
+            Return _min
+        End Get
+        Set(value As Decimal)
+            _min = value
+            If _val < _min Then Me.Value = _min
+            Invalidate()
+        End Set
+    End Property
+
+    Public Property Maximum As Decimal
+        Get
+            Return _max
+        End Get
+        Set(value As Decimal)
+            _max = value
+            If _val > _max Then Me.Value = _max
+            Invalidate()
+        End Set
+    End Property
+
+    Public Property Increment As Decimal
+        Get
+            Return _inc
+        End Get
+        Set(value As Decimal)
+            If value > 0D Then _inc = value
+        End Set
+    End Property
+
+    Public Property DecimalPlaces As Integer
+        Get
+            Return _decimals
+        End Get
+        Set(value As Integer)
+            _decimals = Math.Max(0, value)
+            Invalidate()
+        End Set
+    End Property
+
+    Public Property Value As Decimal
+        Get
+            Return _val
+        End Get
+        Set(value As Decimal)
+            Dim v As Decimal = value
+            If v < _min Then v = _min
+            If v > _max Then v = _max
+            If v <> _val Then
+                _val = v
+                Invalidate()
+                RaiseEvent ValueChanged(Me, EventArgs.Empty)
+            End If
+        End Set
+    End Property
+
+    Private Sub SetValueFromX(x As Integer)
+        Dim trackL As Integer = PadX
+        Dim trackR As Integer = Width - ValueTextW - PadX
+        If trackR <= trackL Then Return
+
+        Dim t As Double = (x - trackL) / CDbl(trackR - trackL)
+        If t < 0.0 Then t = 0.0
+        If t > 1.0 Then t = 1.0
+
+        Dim raw As Decimal = _min + CDec(t) * (_max - _min)
+        Dim snapped As Decimal = Math.Round(raw / _inc) * _inc
+        snapped = Math.Round(snapped, Math.Max(_decimals, 4))
+        Me.Value = snapped
+    End Sub
+
+    Protected Overrides Sub OnMouseDown(e As MouseEventArgs)
+        MyBase.OnMouseDown(e)
+        If Not Enabled Then Return
+        Focus()
+        dragging = True
+        SetValueFromX(e.X)
+    End Sub
+
+    Protected Overrides Sub OnMouseMove(e As MouseEventArgs)
+        MyBase.OnMouseMove(e)
+        If dragging Then SetValueFromX(e.X)
+    End Sub
+
+    Protected Overrides Sub OnMouseUp(e As MouseEventArgs)
+        MyBase.OnMouseUp(e)
+        dragging = False
+    End Sub
+
+    Protected Overrides Sub OnMouseWheel(e As MouseEventArgs)
+        MyBase.OnMouseWheel(e)
+        If Not Enabled Then Return
+        Me.Value = _val + If(e.Delta > 0, _inc, -_inc)
+    End Sub
+
+    Protected Overrides Sub OnKeyDown(e As KeyEventArgs)
+        MyBase.OnKeyDown(e)
+        If Not Enabled Then Return
+        If e.KeyCode = Keys.Left OrElse e.KeyCode = Keys.Down Then
+            Me.Value = _val - _inc
+        ElseIf e.KeyCode = Keys.Right OrElse e.KeyCode = Keys.Up Then
+            Me.Value = _val + _inc
+        End If
+    End Sub
+
+    Protected Overrides Sub OnMouseEnter(e As EventArgs)
+        MyBase.OnMouseEnter(e)
+        hovering = True
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnMouseLeave(e As EventArgs)
+        MyBase.OnMouseLeave(e)
+        hovering = False
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnEnabledChanged(e As EventArgs)
+        MyBase.OnEnabledChanged(e)
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnPaint(e As PaintEventArgs)
+        e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+        e.Graphics.Clear(BackColor)
+
+        Dim trackL As Integer = PadX
+        Dim trackR As Integer = Width - ValueTextW - PadX
+        Dim cy As Single = Height / 2.0F
+
+        Dim range As Decimal = _max - _min
+        Dim t As Single = 0.0F
+        If range > 0D Then t = CSng((_val - _min) / range)
+
+        Dim thumbX As Single = trackL + (trackR - trackL) * t
+
+        Dim trackCol As Color = If(Enabled, UiTheme.Border, Color.FromArgb(34, 32, 90))
+        Dim fillCol As Color = If(Enabled, UiTheme.Accent, Color.FromArgb(0, 100, 115))
+        Dim thumbCol As Color = If(Not Enabled, Color.FromArgb(0, 110, 125),
+                                   If(hovering OrElse dragging, UiTheme.AccentHi, UiTheme.Accent))
+
+        Using p As New Pen(trackCol, 3.0F)
+            p.StartCap = Drawing2D.LineCap.Round
+            p.EndCap = Drawing2D.LineCap.Round
+            e.Graphics.DrawLine(p, trackL, cy, trackR, cy)
+        End Using
+
+        If thumbX > trackL Then
+            Using p As New Pen(fillCol, 3.0F)
+                p.StartCap = Drawing2D.LineCap.Round
+                p.EndCap = Drawing2D.LineCap.Round
+                e.Graphics.DrawLine(p, trackL, cy, thumbX, cy)
+            End Using
+        End If
+
+        Dim r As Single = If(hovering OrElse dragging, 6.5F, 5.5F)
+        Using b As New SolidBrush(thumbCol)
+            e.Graphics.FillEllipse(b, thumbX - r, cy - r, r * 2.0F, r * 2.0F)
+        End Using
+        Using p As New Pen(BackColor, 1.5F)
+            e.Graphics.DrawEllipse(p, thumbX - r, cy - r, r * 2.0F, r * 2.0F)
+        End Using
+
+        Dim txt As String = _val.ToString("F" & _decimals, Globalization.CultureInfo.CurrentCulture)
+        Using b As New SolidBrush(If(Enabled, UiTheme.Txt, UiTheme.TxtDim))
+            Dim sz = e.Graphics.MeasureString(txt, Font)
+            e.Graphics.DrawString(txt, Font, b, Width - sz.Width - 2, cy - sz.Height / 2.0F)
+        End Using
+    End Sub
+End Class
+
+' ============================================================
+'  Sezione collassabile per la sidebar: header cliccabile (chevron +
+'  titolo) e contenuto TableLayoutPanel a colonna singola, compatibile
+'  con gli helper AddRowTitle/AddRowControl/AddDoubleRow.
+' ============================================================
+Public Class CollapsibleSection
+    Inherits TableLayoutPanel
+
+    Private ReadOnly headerLbl As New Label()
+    Public ReadOnly Content As New TableLayoutPanel()
+    Private ReadOnly titleText As String
+    Private isOpen As Boolean = True
+
+    Public Sub New(title As String, Optional startOpen As Boolean = True)
+        titleText = title
+        isOpen = startOpen
+
+        ColumnCount = 1
+        RowCount = 2
+        RowStyles.Add(New RowStyle(SizeType.AutoSize))
+        RowStyles.Add(New RowStyle(SizeType.AutoSize))
+        AutoSize = True
+        AutoSizeMode = AutoSizeMode.GrowAndShrink
+        Margin = New Padding(0, 2, 0, 2)
+        BackColor = UiTheme.BgSidebar
+        Width = 250
+
+        headerLbl.AutoSize = False
+        headerLbl.Width = 246
+        headerLbl.Height = 26
+        headerLbl.Margin = New Padding(0, 2, 0, 0)
+        headerLbl.TextAlign = ContentAlignment.BottomLeft
+        headerLbl.Font = New Font("Segoe UI", 8.0F, FontStyle.Bold)
+        headerLbl.Cursor = Cursors.Hand
+        headerLbl.BackColor = UiTheme.BgSidebar
+        AddHandler headerLbl.Click, AddressOf Header_Click
+        AddHandler headerLbl.Paint, AddressOf Header_Paint
+
+        Content.ColumnCount = 1
+        Content.RowCount = 0
+        Content.AutoSize = True
+        Content.AutoSizeMode = AutoSizeMode.GrowAndShrink
+        Content.GrowStyle = TableLayoutPanelGrowStyle.AddRows
+        Content.Margin = New Padding(0)
+        Content.Padding = New Padding(0)
+        Content.BackColor = UiTheme.BgSidebar
+        Content.Width = 246
+
+        Controls.Add(headerLbl, 0, 0)
+        Controls.Add(Content, 0, 1)
+
+        Content.Visible = isOpen
+        UpdateHeader()
+    End Sub
+
+    Private Sub Header_Click(sender As Object, e As EventArgs)
+        isOpen = Not isOpen
+        Content.Visible = isOpen
+        UpdateHeader()
+    End Sub
+
+    Private Sub UpdateHeader()
+        Dim chevron As String = If(isOpen, ChrW(&H25BC), ChrW(&H25B6))
+        headerLbl.Text = chevron & "  " & titleText.ToUpperInvariant()
+        headerLbl.ForeColor = If(isOpen, UiTheme.Accent, UiTheme.TxtDim)
+    End Sub
+
+    Private Sub Header_Paint(sender As Object, e As PaintEventArgs)
+        ' Sottile linea separatrice sopra l'header.
+        Using p As New Pen(Color.FromArgb(35, 32, 100), 1.0F)
+            e.Graphics.DrawLine(p, 0, 0, headerLbl.Width, 0)
+        End Using
     End Sub
 End Class

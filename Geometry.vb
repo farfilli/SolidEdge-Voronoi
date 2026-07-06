@@ -122,6 +122,18 @@ Public Module Geo2D
         Return Math.Abs(Cross(ab, ap)) / denom
     End Function
 
+    ' Distanza da un SEGMENTO (non retta infinita).
+    Public Function PointSegmentDistance(p As Vec2, a As Vec2, b As Vec2) As Double
+        Dim ab = b - a
+        Dim len2 = ab.X * ab.X + ab.Y * ab.Y
+        If len2 < 0.0000001 Then Return Distance(p, a)
+        Dim t = ((p.X - a.X) * ab.X + (p.Y - a.Y) * ab.Y) / len2
+        If t < 0.0 Then t = 0.0
+        If t > 1.0 Then t = 1.0
+        Dim proj As New Vec2(a.X + ab.X * t, a.Y + ab.Y * t)
+        Return Distance(p, proj)
+    End Function
+
     Public Function IntersectLines(p1 As Vec2, p2 As Vec2, p3 As Vec2, p4 As Vec2) As Vec2
         Dim r = p2 - p1
         Dim s = p4 - p3

@@ -117,6 +117,11 @@ Public Class VoronoiCanvas
     Public Property CellSymbolOffsets As List(Of Integer) = New List(Of Integer)
     Public Event SeedSymbolOffsetsEdited As EventHandler
 
+    ' Posizione corrente del mouse in coordinate mondo (per la status bar).
+    Public Property LastWorldCursorX As Double
+    Public Property LastWorldCursorY As Double
+    Public Event WorldCursorMoved As EventHandler
+
 
 
 
@@ -787,6 +792,12 @@ Public Class VoronoiCanvas
 
     Protected Overrides Sub OnMouseMove(e As MouseEventArgs)
         MyBase.OnMouseMove(e)
+
+        Dim wp = ScreenToWorld(e.Location)
+        LastWorldCursorX = wp.X
+        LastWorldCursorY = wp.Y
+        RaiseEvent WorldCursorMoved(Me, EventArgs.Empty)
+
         If Not AllowSeedEditing Then Return
 
         hoverSeedIndex = HitTestSeed(e.Location)
