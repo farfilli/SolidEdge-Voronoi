@@ -9,19 +9,22 @@ Imports System.Windows.Forms
 
 Public Class MainForm
     Inherits Form
+    Implements IMessageFilter
 
     Private ReadOnly canvas As New VoronoiCanvas()
 
     Private ReadOnly sidebar As New Panel()
-    Private ReadOnly sideLayout As New TableLayoutPanel()
+    Private ReadOnly sideViewport As New Panel()
+    Private ReadOnly sideScroll As New ThemedVScrollBar()
+    Private ReadOnly sideLayout As New FlowLayoutPanel()
 
-    Private ReadOnly numCells As New NumericUpDown()
-    Private ReadOnly numSeed As New NumericUpDown()
-    Private ReadOnly numRelax As New NumericUpDown()
+    Private ReadOnly numCells As New ThemedNumericUpDown()
+    Private ReadOnly numSeed As New ThemedNumericUpDown()
+    Private ReadOnly numRelax As New ThemedNumericUpDown()
 
-    Private ReadOnly cmbStyle As New ComboBox()
-    Private ReadOnly cmbSeedMode As New ComboBox()
-    Private ReadOnly cmbVertexMode As New ComboBox()
+    Private ReadOnly cmbStyle As New ThemedComboBox()
+    Private ReadOnly cmbSeedMode As New ThemedComboBox()
+    Private ReadOnly cmbVertexMode As New ThemedComboBox()
 
     Private ReadOnly numCellScale As New ThemedSlider()
 
@@ -41,27 +44,27 @@ Public Class MainForm
 
     Private ReadOnly tips As New ToolTip()
 
-    Private ReadOnly chkFill As New CheckBox()
-    Private ReadOnly chkFillSymbols As New CheckBox()
-    Private ReadOnly chkOuter As New CheckBox()
-    Private ReadOnly chkSeeds As New CheckBox()
-    Private ReadOnly chkInner As New CheckBox()
-    Private ReadOnly chkRandomRotation As New CheckBox()
-    Private ReadOnly chkExportAsBlocks As New CheckBox()
+    Private ReadOnly chkFill As New ThemedCheckBox()
+    Private ReadOnly chkFillSymbols As New ThemedCheckBox()
+    Private ReadOnly chkOuter As New ThemedCheckBox()
+    Private ReadOnly chkSeeds As New ThemedCheckBox()
+    Private ReadOnly chkInner As New ThemedCheckBox()
+    Private ReadOnly chkRandomRotation As New ThemedCheckBox()
+    Private ReadOnly chkExportAsBlocks As New ThemedCheckBox()
 
-    Private ReadOnly btnGenerate As New Button()
-    Private ReadOnly btnShuffle As New Button()
+    Private ReadOnly btnGenerate As New ThemedButton()
+    Private ReadOnly btnShuffle As New ThemedButton()
 
-    Private ReadOnly btnExportSvg As New Button()
-    Private ReadOnly btnExportDxf As New Button()
-    Private ReadOnly btnToSolidEdge As New Button()
+    Private ReadOnly btnExportSvg As New ThemedButton()
+    Private ReadOnly btnExportDxf As New ThemedButton()
+    Private ReadOnly btnToSolidEdge As New ThemedButton()
 
-    Private ReadOnly btnReadSketchProfile As New Button()
-    Private ReadOnly btnReadBlockDefaultView As New Button()
-    Private ReadOnly btnSaveBlocks As New Button()
-    Private ReadOnly btnLoadBlocks As New Button()
-    Private ReadOnly btnClearBlocks As New Button()
-    Private ReadOnly btnBlockLibrary As New Button()
+    Private ReadOnly btnReadSketchProfile As New ThemedButton()
+    Private ReadOnly btnReadBlockDefaultView As New ThemedButton()
+    Private ReadOnly btnSaveBlocks As New ThemedButton()
+    Private ReadOnly btnLoadBlocks As New ThemedButton()
+    Private ReadOnly btnClearBlocks As New ThemedButton()
+    Private ReadOnly btnBlockLibrary As New ThemedButton()
     Private blockLibForm As BlockLibraryForm = Nothing
     Private currentBlockSymbols As New List(Of BlockDefinition)()
 
@@ -117,6 +120,8 @@ Public Class MainForm
 
         AddHandler canvas.WorldCursorMoved, AddressOf Canvas_WorldCursorMoved
 
+        Application.AddMessageFilter(Me)
+
         AddHandler btnGenerate.Click, AddressOf GenerateRandomDiagram
         AddHandler btnShuffle.Click, AddressOf ShuffleSeed
         AddHandler btnReadSketchProfile.Click, AddressOf ReadSketchProfile_Click
@@ -166,17 +171,31 @@ Public Class MainForm
         sidebar.BackColor = UiTheme.BgSidebar
         sidebar.Padding = New Padding(10, 6, 6, 6)
 
-        sideLayout.Dock = DockStyle.Fill
-        sideLayout.AutoScroll = True
-        sideLayout.ColumnCount = 1
-        sideLayout.RowCount = 0
-        sideLayout.BackColor = UiTheme.BgSidebar
+        ' Scrolling custom: viewport senza AutoScroll + ThemedVScrollBar a tema.
+        ' Cosi' la barra e' coerente col tema e compare solo quando serve.
+        sideViewport.Dock = DockStyle.Fill
+        sideViewport.BackColor = UiTheme.BgSidebar
+
+        sideScroll.Dock = DockStyle.Right
+        sideScroll.Width = 8
+        sideScroll.Visible = False
+
+        sideLayout.FlowDirection = FlowDirection.TopDown
+        sideLayout.WrapContents = False
         sideLayout.AutoSize = True
-        sideLayout.GrowStyle = TableLayoutPanelGrowStyle.AddRows
+        sideLayout.AutoSizeMode = AutoSizeMode.GrowAndShrink
+        sideLayout.BackColor = UiTheme.BgSidebar
         sideLayout.Padding = New Padding(0)
         sideLayout.Margin = New Padding(0)
+        sideLayout.Location = New Point(0, 0)
 
-        sidebar.Controls.Add(sideLayout)
+        sideViewport.Controls.Add(sideLayout)
+        sidebar.Controls.Add(sideViewport)
+        sidebar.Controls.Add(sideScroll)
+
+        AddHandler sideLayout.SizeChanged, Sub(s, ev) UpdateSidebarScroll()
+        AddHandler sideViewport.Resize, Sub(s, ev) UpdateSidebarScroll()
+        AddHandler sideScroll.ScrollChanged, Sub(s, ev) sideLayout.Top = -sideScroll.Value
 
         ' Titolo app
         Dim appTitle As New Label With {
@@ -184,12 +203,11 @@ Public Class MainForm
             .ForeColor = UiTheme.Accent,
             .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
             .AutoSize = False,
-            .Width = 246,
+            .Width = 238,
             .Height = 26,
             .Margin = New Padding(3, 4, 3, 2),
             .TextAlign = ContentAlignment.MiddleLeft
         }
-        sideLayout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
         sideLayout.Controls.Add(appTitle)
 
         ' ===== GENERATION =====
@@ -207,8 +225,8 @@ Public Class MainForm
         curSection = NewSection("STYLE", True)
         AddRowTitle("Cell Style")
         AddRowControl(cmbStyle)
-        AddDoubleRow("Modalità vertice", cmbVertexMode,
-             "Dimensione vertice", numVertexTrim)
+        AddDoubleRow("Vertex Mode", cmbVertexMode,
+             "Vertex Size", numVertexTrim)
         AddDoubleRow("Inner Offset", numInnerOffset,
              "Curve Width", numCurveWidth)
         AddRowControl(chkFill, 22)
@@ -222,7 +240,7 @@ Public Class MainForm
         AddRowControl(chkInner, 22)
 
         ' ===== SKETCH & BLOCKS =====
-        curSection = NewSection("SKETCH & BLOCKS", True)
+        curSection = NewSection("SKETCH & BLOCKS", False)
         AddRowControl(btnReadSketchProfile, 30)
         AddRowControl(btnReadBlockDefaultView, 30)
         AddRowControl(btnLoadBlocks, 30)
@@ -240,9 +258,42 @@ Public Class MainForm
 
     Private Function NewSection(title As String, startOpen As Boolean) As CollapsibleSection
         Dim sec As New CollapsibleSection(title, startOpen)
-        sideLayout.RowStyles.Add(New RowStyle(SizeType.AutoSize))
         sideLayout.Controls.Add(sec)
         Return sec
+    End Function
+
+    Private Sub UpdateSidebarScroll()
+        Dim vp As Integer = sideViewport.ClientSize.Height
+        Dim ch As Integer = sideLayout.Height
+
+        If ch > vp AndAlso vp > 0 Then
+            sideScroll.ContentSize = ch
+            sideScroll.ViewportSize = vp
+            sideScroll.Visible = True
+            sideLayout.Top = -sideScroll.Value
+        Else
+            sideScroll.Visible = False
+            sideScroll.Value = 0
+            sideLayout.Top = 0
+        End If
+    End Sub
+
+    ' Rotella del mouse sopra la sidebar -> scorre la scrollbar custom.
+    Public Function PreFilterMessage(ByRef m As Message) As Boolean Implements IMessageFilter.PreFilterMessage
+        Const WM_MOUSEWHEEL As Integer = &H20A
+        If m.Msg <> WM_MOUSEWHEEL Then Return False
+        If Not sideScroll.Visible Then Return False
+
+        Dim pos As Point = Control.MousePosition
+        If Not sidebar.RectangleToScreen(sidebar.ClientRectangle).Contains(pos) Then Return False
+
+        ' High word di WParam = delta rotella come Int16: la si reinterpreta in
+        ' complemento a due a mano (CShort su 0xFF88 andrebbe in overflow).
+        Dim raw As Integer = CInt((m.WParam.ToInt64() >> 16) And &HFFFF&)
+        If raw >= &H8000 Then raw -= &H10000
+        Dim delta As Integer = raw
+        sideScroll.Value -= Math.Sign(delta) * 60
+        Return True
     End Function
 
     ' ===== Tema scuro =====
@@ -263,16 +314,6 @@ Public Class MainForm
         For Each chk In New CheckBox() {chkFill, chkFillSymbols, chkOuter, chkSeeds, chkInner, chkRandomRotation, chkExportAsBlocks}
             chk.ForeColor = UiTheme.Txt
             chk.BackColor = UiTheme.BgSidebar
-        Next
-
-        StyleCombo(cmbStyle)
-        StyleCombo(cmbSeedMode)
-        StyleCombo(cmbVertexMode)
-
-        For Each num In New NumericUpDown() {numCells, numSeed, numRelax}
-            num.BackColor = UiTheme.BgField
-            num.ForeColor = UiTheme.Txt
-            num.BorderStyle = BorderStyle.FixedSingle
         Next
     End Sub
 
@@ -297,30 +338,6 @@ Public Class MainForm
         End If
     End Sub
 
-    Private Sub StyleCombo(cmb As ComboBox)
-        cmb.FlatStyle = FlatStyle.Flat
-        cmb.BackColor = UiTheme.BgField
-        cmb.ForeColor = UiTheme.Txt
-        cmb.DrawMode = DrawMode.OwnerDrawFixed
-        cmb.ItemHeight = 17
-        AddHandler cmb.DrawItem, AddressOf Combo_DrawItem
-    End Sub
-
-    Private Sub Combo_DrawItem(sender As Object, e As DrawItemEventArgs)
-        If e.Index < 0 Then Return
-        Dim cmb = DirectCast(sender, ComboBox)
-        Dim selected As Boolean = (e.State And DrawItemState.Selected) = DrawItemState.Selected
-
-        Using b As New SolidBrush(If(selected, UiTheme.BgFieldHi, UiTheme.BgField))
-            e.Graphics.FillRectangle(b, e.Bounds)
-        End Using
-        Using tb As New SolidBrush(UiTheme.Txt)
-            e.Graphics.DrawString(cmb.Items(e.Index).ToString(), cmb.Font, tb,
-                                  e.Bounds.X + 4, e.Bounds.Y + 1)
-        End Using
-        If selected Then e.DrawFocusRectangle()
-    End Sub
-
     ' ===== Status bar =====
 
     Private Sub BuildStatusBar()
@@ -337,7 +354,6 @@ Public Class MainForm
         lblStatusCoords.AutoSize = True
         lblStatusCoords.ForeColor = UiTheme.TxtDim
         lblStatusCoords.Font = New Font("Segoe UI", 8.5F)
-        lblStatusCoords.Location = New Point(560, 6)
         lblStatusCoords.Text = ""
 
         lblStatusReady.AutoSize = True
@@ -355,11 +371,7 @@ Public Class MainForm
         statusBar.Controls.Add(lblStatusDot)
         statusBar.Controls.Add(lblStatusReady)
 
-        AddHandler statusBar.Resize, Sub()
-                                         lblStatusReady.Location = New Point(statusBar.Width - lblStatusReady.Width - 14, 6)
-                                         lblStatusDot.Location = New Point(lblStatusReady.Left - lblStatusDot.Width - 2, 6)
-                                         lblStatusCoords.Location = New Point(Math.Max(560, statusBar.Width - 420), 6)
-                                     End Sub
+        AddHandler statusBar.Resize, Sub() PositionStatusLabels()
     End Sub
 
     Private Sub UpdateStatusBar()
@@ -379,11 +391,21 @@ Public Class MainForm
                              "Seeds: " & seedCount & sep &
                              "Domain: " & domainTxt & sep &
                              "Blocks in memory: " & blockCount
+
+        PositionStatusLabels()
+    End Sub
+
+    ' Le coordinate seguono in coda ai testi informativi di sinistra.
+    Private Sub PositionStatusLabels()
+        lblStatusCoords.Location = New Point(lblStatusInfo.Right + 30, 6)
+        lblStatusReady.Location = New Point(statusBar.Width - lblStatusReady.Width - 14, 6)
+        lblStatusDot.Location = New Point(lblStatusReady.Left - lblStatusDot.Width - 2, 6)
     End Sub
 
     Private Sub Canvas_WorldCursorMoved(sender As Object, e As EventArgs)
         lblStatusCoords.Text = "X: " & canvas.LastWorldCursorX.ToString("0.0") &
                                "   Y: " & canvas.LastWorldCursorY.ToString("0.0")
+        lblStatusCoords.Location = New Point(lblStatusInfo.Right + 30, 6)
     End Sub
 
     ' ===== Tooltips =====
@@ -391,14 +413,14 @@ Public Class MainForm
     Private Sub SetupTooltips()
         tips.AutoPopDelay = 8000
         tips.InitialDelay = 500
-        tips.SetToolTip(numRelax, "Iterazioni di rilassamento (Lloyd): uniforma le dimensioni delle celle")
-        tips.SetToolTip(cmbSeedMode, "Distribuzione dei semi nel dominio")
-        tips.SetToolTip(numInnerOffset, "Distanza della curva interna dal bordo cella")
-        tips.SetToolTip(numCellScale, "Scala globale dei simboli (rotella sul canvas per la singola cella)")
-        tips.SetToolTip(canvas, "Rotella: scala simbolo" & ChrW(10) &
-                                "Shift+Rotella: ruota simbolo" & ChrW(10) &
-                                "CTRL+Rotella: cambia simbolo/blocco" & ChrW(10) &
-                                "Doppio clic: aggiungi seme  -  Clic destro: rimuovi seme")
+        tips.SetToolTip(numRelax, "Lloyd relaxation iterations: evens out cell sizes")
+        tips.SetToolTip(cmbSeedMode, "Seed distribution inside the domain")
+        tips.SetToolTip(numInnerOffset, "Distance of the inner curve from the cell border")
+        tips.SetToolTip(numCellScale, "Global symbol scale (mouse wheel on the canvas for a single cell)")
+        tips.SetToolTip(canvas, "Wheel: scale symbol" & ChrW(10) &
+                                "Shift+Wheel: rotate symbol" & ChrW(10) &
+                                "CTRL+Wheel: cycle symbol/block" & ChrW(10) &
+                                "Double click: add seed  -  Right click: remove seed")
     End Sub
 
     ' ===== Chrome scuro (titolo finestra + scrollbar) =====
@@ -419,11 +441,27 @@ Public Class MainForm
             If DwmSetWindowAttribute(Handle, 20, dark, 4) <> 0 Then
                 DwmSetWindowAttribute(Handle, 19, dark, 4)
             End If
-            ' Scrollbar scure sul pannello scorrevole della sidebar.
-            SetWindowTheme(sideLayout.Handle, "DarkMode_Explorer", Nothing)
+
+            ' Windows 11: colori personalizzati di caption, bordo e testo (COLORREF 0x00BBGGRR).
+            ' Su Windows 10 le chiamate falliscono e resta il dark generico: va bene.
+            Dim captionCol As Integer = ColRef(UiTheme.BgSidebar)
+            Dim borderCol As Integer = ColRef(UiTheme.BgSidebar)
+            Dim textCol As Integer = ColRef(UiTheme.Txt)
+            DwmSetWindowAttribute(Handle, 35, captionCol, 4)   ' DWMWA_CAPTION_COLOR
+            DwmSetWindowAttribute(Handle, 34, borderCol, 4)    ' DWMWA_BORDER_COLOR
+            DwmSetWindowAttribute(Handle, 36, textCol, 4)      ' DWMWA_TEXT_COLOR
         Catch
             ' Sistemi senza supporto: si ignora, resta il chrome standard.
         End Try
+    End Sub
+
+    Private Shared Function ColRef(c As Color) As Integer
+        Return c.R Or (CInt(c.G) << 8) Or (CInt(c.B) << 16)
+    End Function
+
+    Protected Overrides Sub OnFormClosed(e As FormClosedEventArgs)
+        Application.RemoveMessageFilter(Me)
+        MyBase.OnFormClosed(e)
     End Sub
 
     Private Sub AddRowTitle(text As String)
@@ -434,7 +472,7 @@ Public Class MainForm
             .Font = New Font("Segoe UI", 7.5F),
             .AutoSize = False,
             .Height = 16,
-            .Width = 235,
+            .Width = 238,
             .Margin = New Padding(3, 4, 3, 0),
             .TextAlign = ContentAlignment.BottomLeft
         }
@@ -443,7 +481,7 @@ Public Class MainForm
 
     Private Sub AddRowControl(ctrl As Control, Optional forcedHeight As Integer = 28)
         curSection.Content.RowStyles.Add(New RowStyle(SizeType.AutoSize))
-        ctrl.Width = 235
+        ctrl.Width = 238
         ctrl.Height = forcedHeight
         ctrl.Margin = New Padding(3, 1, 3, 3)
         curSection.Content.Controls.Add(ctrl)
@@ -461,17 +499,23 @@ Public Class MainForm
         Dim host As New TableLayoutPanel With {
         .ColumnCount = 2,
         .RowCount = 1,
-        .Width = 235,
-        .AutoSize = True,
+        .Width = 238,
+        .Height = 16 + controlHeight + 4,
+        .AutoSize = False,
         .Margin = New Padding(3, 0, 3, 3),
         .Padding = New Padding(0)
     }
 
         host.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50.0F))
         host.ColumnStyles.Add(New ColumnStyle(SizeType.Percent, 50.0F))
+        host.RowStyles.Add(New RowStyle(SizeType.Percent, 100.0F))
 
         Dim leftPanel = BuildLabeledControlPanel(leftTitle, leftCtrl, controlHeight)
         Dim rightPanel = BuildLabeledControlPanel(rightTitle, rightCtrl, controlHeight)
+
+        ' Riempiono la cella; gutter centrale di 6px, bordi allineati alle righe singole.
+        leftPanel.Margin = New Padding(0, 0, 3, 0)
+        rightPanel.Margin = New Padding(3, 0, 0, 0)
 
         host.Controls.Add(leftPanel, 0, 0)
         host.Controls.Add(rightPanel, 1, 0)
@@ -502,13 +546,13 @@ Public Class MainForm
         .AutoSize = False,
         .Height = 16,
         .Dock = DockStyle.Top,
-        .Margin = New Padding(0, 4, 4, 0),
+        .Margin = New Padding(0, 4, 0, 0),
         .TextAlign = ContentAlignment.BottomLeft
     }
 
         ctrl.Dock = DockStyle.Top
         ctrl.Height = forcedHeight
-        ctrl.Margin = New Padding(0, 0, 4, 0)
+        ctrl.Margin = New Padding(0)
 
         panel.Controls.Add(lbl, 0, 0)
         panel.Controls.Add(ctrl, 0, 1)
@@ -526,7 +570,7 @@ Public Class MainForm
         cmbSeedMode.SelectedItem = SeedPlacementMode.Random.ToString()
 
         cmbVertexMode.DropDownStyle = ComboBoxStyle.DropDownList
-        cmbVertexMode.Items.AddRange(New String() {"Spigolo vivo", "Raggiatura con arco", "Curva spline"})
+        cmbVertexMode.Items.AddRange(New String() {"Sharp corner", "Arc fillet", "Spline curve"})
         cmbVertexMode.SelectedIndex = 2
 
         numCells.Minimum = 5
@@ -548,13 +592,13 @@ Public Class MainForm
         numCellScale.Value = 0.82D
 
         numInnerOffset.Minimum = 0
-        numInnerOffset.Maximum = 200
+        numInnerOffset.Maximum = 30
         numInnerOffset.DecimalPlaces = 1
         numInnerOffset.Increment = 1D
         numInnerOffset.Value = 0D
 
         numVertexTrim.Minimum = 0D
-        numVertexTrim.Maximum = 3D
+        numVertexTrim.Maximum = 2D
         numVertexTrim.DecimalPlaces = 2
         numVertexTrim.Increment = 0.05D
         numVertexTrim.Value = 0.22D
@@ -1335,12 +1379,12 @@ Public Class MainForm
     End Sub
     Private Sub SaveBlocks_Click(sender As Object, e As EventArgs)
         If currentBlockSymbols Is Nothing OrElse currentBlockSymbols.Count = 0 Then
-            MessageBox.Show("Nessun blocco in memoria da salvare.", "Save Blocks", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            MessageBox.Show("No blocks in memory to save.", "Save Blocks", MessageBoxButtons.OK, MessageBoxIcon.Information)
             Return
         End If
 
         Using dlg As New SaveFileDialog()
-            dlg.Title = "Salva libreria blocchi"
+            dlg.Title = "Save block library"
             dlg.Filter = "SE-Voronoi blocks (*.sevb)|*.sevb"
             dlg.DefaultExt = "sevb"
             dlg.AddExtension = True
@@ -1349,10 +1393,10 @@ Public Class MainForm
             If dlg.ShowDialog(Me) = DialogResult.OK Then
                 Try
                     ExportGeometry.SaveBlocksToFile(dlg.FileName, currentBlockSymbols)
-                    MessageBox.Show(currentBlockSymbols.Count & " blocco/i salvati.",
+                    MessageBox.Show(currentBlockSymbols.Count & " block(s) saved.",
                                     "Save Blocks", MessageBoxButtons.OK, MessageBoxIcon.Information)
                 Catch ex As Exception
-                    MessageBox.Show("Errore salvataggio blocchi:" & Environment.NewLine & ex.Message,
+                    MessageBox.Show("Error saving blocks:" & Environment.NewLine & ex.Message,
                                     "Save Blocks", MessageBoxButtons.OK, MessageBoxIcon.Error)
                 End Try
             End If
@@ -1429,11 +1473,11 @@ Public Class MainForm
 
     Private Sub ClearBlocks_Click(sender As Object, e As EventArgs)
         If currentBlockSymbols Is Nothing OrElse currentBlockSymbols.Count = 0 Then
-            MessageBox.Show("Nessun blocco in memoria.", "Clear Blocks", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            MessageBox.Show("No blocks in memory.", "Clear Blocks", MessageBoxButtons.OK, MessageBoxIcon.Information)
             Return
         End If
 
-        If MessageBox.Show("Rimuovere tutti i blocchi caricati dalla memoria?", "Clear Blocks",
+        If MessageBox.Show("Remove all loaded blocks from memory?", "Clear Blocks",
                            MessageBoxButtons.YesNo, MessageBoxIcon.Question) <> DialogResult.Yes Then Return
 
         currentBlockSymbols = New List(Of BlockDefinition)()
@@ -1854,8 +1898,12 @@ Public Class BlockLibraryForm
         btnDel.Left = 8
         btnDel.Top = ThumbPx + 26
         btnDel.FlatStyle = FlatStyle.Flat
-        btnDel.BackColor = Color.White
-        btnDel.ForeColor = Color.FromArgb(30, 40, 55)
+        btnDel.BackColor = UiTheme.BgField
+        btnDel.ForeColor = UiTheme.Txt
+        btnDel.FlatAppearance.BorderColor = UiTheme.Border
+        btnDel.FlatAppearance.BorderSize = 1
+        btnDel.FlatAppearance.MouseOverBackColor = UiTheme.BgFieldHi
+        btnDel.Cursor = Cursors.Hand
         Dim target As BlockDefinition = def
         AddHandler btnDel.Click, Sub(s, e) RemoveBlock(target)
         tile.Controls.Add(btnDel)
@@ -1967,6 +2015,21 @@ Public NotInheritable Class UiTheme
     Public Shared ReadOnly Accent As Color = Color.FromArgb(0, 188, 212)
     Public Shared ReadOnly AccentHi As Color = Color.FromArgb(110, 231, 243)
     Public Shared ReadOnly StatusBg As Color = Color.FromArgb(13, 11, 69)
+
+    Public Shared Function RoundedRect(r As RectangleF, radius As Single) As Drawing2D.GraphicsPath
+        Dim gp As New Drawing2D.GraphicsPath()
+        Dim d As Single = radius * 2.0F
+        If d <= 0.0F OrElse r.Width <= d OrElse r.Height <= d Then
+            gp.AddRectangle(r)
+            Return gp
+        End If
+        gp.AddArc(r.X, r.Y, d, d, 180, 90)
+        gp.AddArc(r.Right - d, r.Y, d, d, 270, 90)
+        gp.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90)
+        gp.AddArc(r.X, r.Bottom - d, d, d, 90, 90)
+        gp.CloseFigure()
+        Return gp
+    End Function
 End Class
 
 ' ============================================================
@@ -2199,10 +2262,10 @@ Public Class CollapsibleSection
         AutoSizeMode = AutoSizeMode.GrowAndShrink
         Margin = New Padding(0, 2, 0, 2)
         BackColor = UiTheme.BgSidebar
-        Width = 250
+        Width = 244
 
         headerLbl.AutoSize = False
-        headerLbl.Width = 246
+        headerLbl.Width = 244
         headerLbl.Height = 26
         headerLbl.Margin = New Padding(0, 2, 0, 0)
         headerLbl.TextAlign = ContentAlignment.BottomLeft
@@ -2220,7 +2283,7 @@ Public Class CollapsibleSection
         Content.Margin = New Padding(0)
         Content.Padding = New Padding(0)
         Content.BackColor = UiTheme.BgSidebar
-        Content.Width = 246
+        Content.Width = 244
 
         Controls.Add(headerLbl, 0, 0)
         Controls.Add(Content, 0, 1)
@@ -2245,6 +2308,781 @@ Public Class CollapsibleSection
         ' Sottile linea separatrice sopra l'header.
         Using p As New Pen(Color.FromArgb(35, 32, 100), 1.0F)
             e.Graphics.DrawLine(p, 0, 0, headerLbl.Width, 0)
+        End Using
+    End Sub
+End Class
+
+
+' ============================================================
+'  Pulsante a tema con angoli arrotondati e stati hover/pressed.
+'  I colori arrivano da StyleButton (BackColor/ForeColor/FlatAppearance),
+'  quindi l'interfaccia resta quella di Button.
+' ============================================================
+Public Class ThemedButton
+    Inherits Button
+
+    Private hovering As Boolean = False
+    Private pressed As Boolean = False
+
+    Public Sub New()
+        SetStyle(ControlStyles.UserPaint Or
+                 ControlStyles.AllPaintingInWmPaint Or
+                 ControlStyles.OptimizedDoubleBuffer, True)
+    End Sub
+
+    Protected Overrides Sub OnMouseEnter(e As EventArgs)
+        MyBase.OnMouseEnter(e)
+        hovering = True
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnMouseLeave(e As EventArgs)
+        MyBase.OnMouseLeave(e)
+        hovering = False
+        pressed = False
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnMouseDown(e As MouseEventArgs)
+        MyBase.OnMouseDown(e)
+        pressed = True
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnMouseUp(e As MouseEventArgs)
+        MyBase.OnMouseUp(e)
+        pressed = False
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnPaint(e As PaintEventArgs)
+        e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+
+        ' Sfondo del contenitore dietro gli angoli arrotondati.
+        Dim parentBg As Color = If(Parent IsNot Nothing, Parent.BackColor, UiTheme.BgSidebar)
+        e.Graphics.Clear(parentBg)
+
+        Dim bg As Color = BackColor
+        If Not Enabled Then
+            bg = Color.FromArgb(Math.Max(0, bg.R \ 2), Math.Max(0, bg.G \ 2 + 10), Math.Max(0, bg.B \ 2 + 20))
+        ElseIf pressed AndAlso Not FlatAppearance.MouseDownBackColor.IsEmpty Then
+            bg = FlatAppearance.MouseDownBackColor
+        ElseIf hovering AndAlso Not FlatAppearance.MouseOverBackColor.IsEmpty Then
+            bg = FlatAppearance.MouseOverBackColor
+        End If
+
+        Dim r As New RectangleF(0.5F, 0.5F, Width - 1.0F, Height - 1.0F)
+        Using gp = UiTheme.RoundedRect(r, 6.0F)
+            Using b As New SolidBrush(bg)
+                e.Graphics.FillPath(b, gp)
+            End Using
+            If FlatAppearance.BorderSize > 0 Then
+                Using p As New Pen(If(hovering AndAlso Enabled, UiTheme.Accent, FlatAppearance.BorderColor), 1.0F)
+                    e.Graphics.DrawPath(p, gp)
+                End Using
+            End If
+        End Using
+
+        Dim txtCol As Color = If(Enabled, ForeColor, UiTheme.TxtDim)
+        TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, txtCol,
+                              TextFormatFlags.HorizontalCenter Or TextFormatFlags.VerticalCenter)
+    End Sub
+End Class
+
+' ============================================================
+'  CheckBox a tema: casella scura arrotondata, spunta su fondo accento.
+'  Eredita da CheckBox: toggle, eventi e Checked restano quelli standard.
+' ============================================================
+Public Class ThemedCheckBox
+    Inherits CheckBox
+
+    Private hovering As Boolean = False
+
+    Public Sub New()
+        SetStyle(ControlStyles.UserPaint Or
+                 ControlStyles.AllPaintingInWmPaint Or
+                 ControlStyles.OptimizedDoubleBuffer, True)
+        Cursor = Cursors.Hand
+    End Sub
+
+    Protected Overrides Sub OnMouseEnter(e As EventArgs)
+        MyBase.OnMouseEnter(e)
+        hovering = True
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnMouseLeave(e As EventArgs)
+        MyBase.OnMouseLeave(e)
+        hovering = False
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnCheckedChanged(e As EventArgs)
+        MyBase.OnCheckedChanged(e)
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnPaint(e As PaintEventArgs)
+        e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+        e.Graphics.Clear(BackColor)
+
+        Dim boxSize As Single = 15.0F
+        Dim by As Single = (Height - boxSize) / 2.0F
+        Dim box As New RectangleF(1.0F, by, boxSize, boxSize)
+
+        Using gp = UiTheme.RoundedRect(box, 3.0F)
+            If Checked Then
+                Dim fill As Color = If(Not Enabled, Color.FromArgb(0, 110, 125),
+                                       If(hovering, UiTheme.AccentHi, UiTheme.Accent))
+                Using b As New SolidBrush(fill)
+                    e.Graphics.FillPath(b, gp)
+                End Using
+            Else
+                Using b As New SolidBrush(If(hovering AndAlso Enabled, UiTheme.BgFieldHi, UiTheme.BgField))
+                    e.Graphics.FillPath(b, gp)
+                End Using
+                Using p As New Pen(If(hovering AndAlso Enabled, UiTheme.Accent, UiTheme.Border), 1.0F)
+                    e.Graphics.DrawPath(p, gp)
+                End Using
+            End If
+        End Using
+
+        If Checked Then
+            Using p As New Pen(UiTheme.BgCanvas, 2.0F)
+                p.StartCap = Drawing2D.LineCap.Round
+                p.EndCap = Drawing2D.LineCap.Round
+                p.LineJoin = Drawing2D.LineJoin.Round
+                e.Graphics.DrawLines(p, New PointF() {
+                    New PointF(box.X + 3.5F, box.Y + 8.0F),
+                    New PointF(box.X + 6.5F, box.Y + 11.0F),
+                    New PointF(box.X + 11.5F, box.Y + 4.5F)
+                })
+            End Using
+        End If
+
+        Dim txtCol As Color = If(Enabled, ForeColor, UiTheme.TxtDim)
+        Dim txtRect As New Rectangle(CInt(boxSize) + 7, 0, Width - CInt(boxSize) - 7, Height)
+        TextRenderer.DrawText(e.Graphics, Text, Font, txtRect, txtCol,
+                              TextFormatFlags.Left Or TextFormatFlags.VerticalCenter)
+    End Sub
+End Class
+
+' ============================================================
+'  NumericUpDown a tema: campo di testo scuro + frecce disegnate.
+'  Espone la stessa interfaccia usata dal resto del codice
+'  (Minimum/Maximum/Value/Increment/DecimalPlaces, ValueChanged).
+' ============================================================
+Public Class ThemedNumericUpDown
+    Inherits Control
+
+    Private ReadOnly box As New TextBox()
+    Private _min As Decimal = 0D
+    Private _max As Decimal = 100D
+    Private _val As Decimal = 0D
+    Private _inc As Decimal = 1D
+    Private _decimals As Integer = 0
+    Private updatingText As Boolean = False
+    Private hoverZone As Integer = 0    ' 0 nessuna, 1 su, 2 giu
+
+    Private Const ArrowW As Integer = 18
+
+    Public Event ValueChanged As EventHandler
+
+    Public Sub New()
+        SetStyle(ControlStyles.UserPaint Or
+                 ControlStyles.AllPaintingInWmPaint Or
+                 ControlStyles.OptimizedDoubleBuffer Or
+                 ControlStyles.ResizeRedraw, True)
+        Height = 26
+        BackColor = UiTheme.BgField
+
+        box.BorderStyle = BorderStyle.None
+        box.BackColor = UiTheme.BgField
+        box.ForeColor = UiTheme.Txt
+        box.TextAlign = HorizontalAlignment.Left
+        AddHandler box.KeyDown, AddressOf Box_KeyDown
+        AddHandler box.Leave, AddressOf Box_Leave
+        Controls.Add(box)
+
+        LayoutBox()
+        SyncText()
+    End Sub
+
+    Public Property Minimum As Decimal
+        Get
+            Return _min
+        End Get
+        Set(value As Decimal)
+            _min = value
+            If _val < _min Then Me.Value = _min
+        End Set
+    End Property
+
+    Public Property Maximum As Decimal
+        Get
+            Return _max
+        End Get
+        Set(value As Decimal)
+            _max = value
+            If _val > _max Then Me.Value = _max
+        End Set
+    End Property
+
+    Public Property Increment As Decimal
+        Get
+            Return _inc
+        End Get
+        Set(value As Decimal)
+            If value > 0D Then _inc = value
+        End Set
+    End Property
+
+    Public Property DecimalPlaces As Integer
+        Get
+            Return _decimals
+        End Get
+        Set(value As Integer)
+            _decimals = Math.Max(0, value)
+            SyncText()
+        End Set
+    End Property
+
+    Public Property Value As Decimal
+        Get
+            Return _val
+        End Get
+        Set(value As Decimal)
+            Dim v As Decimal = value
+            If v < _min Then v = _min
+            If v > _max Then v = _max
+            If v <> _val Then
+                _val = v
+                SyncText()
+                RaiseEvent ValueChanged(Me, EventArgs.Empty)
+            Else
+                SyncText()
+            End If
+        End Set
+    End Property
+
+    Private Sub LayoutBox()
+        box.Location = New Point(8, (Height - box.Height) \ 2)
+        box.Width = Math.Max(10, Width - ArrowW - 14)
+    End Sub
+
+    Private Sub SyncText()
+        updatingText = True
+        box.Text = _val.ToString("F" & _decimals, Globalization.CultureInfo.CurrentCulture)
+        updatingText = False
+    End Sub
+
+    Private Sub CommitText()
+        If updatingText Then Return
+        Dim v As Decimal
+        If Decimal.TryParse(box.Text, Globalization.NumberStyles.Number,
+                            Globalization.CultureInfo.CurrentCulture, v) OrElse
+           Decimal.TryParse(box.Text, Globalization.NumberStyles.Number,
+                            Globalization.CultureInfo.InvariantCulture, v) Then
+            Me.Value = v
+        Else
+            SyncText()
+        End If
+    End Sub
+
+    Private Sub Box_KeyDown(sender As Object, e As KeyEventArgs)
+        If e.KeyCode = Keys.Enter Then
+            CommitText()
+            e.Handled = True
+            e.SuppressKeyPress = True
+        ElseIf e.KeyCode = Keys.Up Then
+            Me.Value = _val + _inc
+            e.Handled = True
+        ElseIf e.KeyCode = Keys.Down Then
+            Me.Value = _val - _inc
+            e.Handled = True
+        End If
+    End Sub
+
+    Private Sub Box_Leave(sender As Object, e As EventArgs)
+        CommitText()
+    End Sub
+
+    Protected Overrides Sub OnResize(e As EventArgs)
+        MyBase.OnResize(e)
+        LayoutBox()
+    End Sub
+
+    Protected Overrides Sub OnEnabledChanged(e As EventArgs)
+        MyBase.OnEnabledChanged(e)
+        box.Enabled = Enabled
+        box.BackColor = UiTheme.BgField
+        box.ForeColor = If(Enabled, UiTheme.Txt, UiTheme.TxtDim)
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnMouseMove(e As MouseEventArgs)
+        MyBase.OnMouseMove(e)
+        Dim z As Integer = 0
+        If e.X >= Width - ArrowW Then
+            z = If(e.Y < Height \ 2, 1, 2)
+        End If
+        If z <> hoverZone Then
+            hoverZone = z
+            Invalidate()
+        End If
+    End Sub
+
+    Protected Overrides Sub OnMouseLeave(e As EventArgs)
+        MyBase.OnMouseLeave(e)
+        If hoverZone <> 0 Then
+            hoverZone = 0
+            Invalidate()
+        End If
+    End Sub
+
+    Protected Overrides Sub OnMouseDown(e As MouseEventArgs)
+        MyBase.OnMouseDown(e)
+        If Not Enabled Then Return
+        If e.X >= Width - ArrowW Then
+            CommitText()
+            If e.Y < Height \ 2 Then
+                Me.Value = _val + _inc
+            Else
+                Me.Value = _val - _inc
+            End If
+        End If
+    End Sub
+
+    Protected Overrides Sub OnMouseWheel(e As MouseEventArgs)
+        MyBase.OnMouseWheel(e)
+        If Not Enabled Then Return
+        Me.Value = _val + If(e.Delta > 0, _inc, -_inc)
+    End Sub
+
+    Protected Overrides Sub OnPaint(e As PaintEventArgs)
+        e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+
+        Dim parentBg As Color = If(Parent IsNot Nothing, Parent.BackColor, UiTheme.BgSidebar)
+        e.Graphics.Clear(parentBg)
+
+        Dim r As New RectangleF(0.5F, 0.5F, Width - 1.0F, Height - 1.0F)
+        Using gp = UiTheme.RoundedRect(r, 5.0F)
+            Using b As New SolidBrush(UiTheme.BgField)
+                e.Graphics.FillPath(b, gp)
+            End Using
+            Using p As New Pen(UiTheme.Border, 1.0F)
+                e.Graphics.DrawPath(p, gp)
+            End Using
+        End Using
+
+        ' Zone frecce (evidenziate al passaggio).
+        Dim ax As Integer = Width - ArrowW
+        If hoverZone = 1 Then
+            Using b As New SolidBrush(UiTheme.BgFieldHi)
+                e.Graphics.FillRectangle(b, ax, 2, ArrowW - 3, Height \ 2 - 2)
+            End Using
+        ElseIf hoverZone = 2 Then
+            Using b As New SolidBrush(UiTheme.BgFieldHi)
+                e.Graphics.FillRectangle(b, ax, Height \ 2, ArrowW - 3, Height \ 2 - 3)
+            End Using
+        End If
+
+        Dim arrowCol As Color = If(Enabled, UiTheme.TxtDim, UiTheme.Border)
+        Using p As New Pen(arrowCol, 1.4F)
+            p.StartCap = Drawing2D.LineCap.Round
+            p.EndCap = Drawing2D.LineCap.Round
+            Dim cxp As Single = ax + (ArrowW - 3) / 2.0F
+            ' freccia su
+            e.Graphics.DrawLines(p, New PointF() {
+                New PointF(cxp - 3.2F, Height * 0.25F + 1.6F),
+                New PointF(cxp, Height * 0.25F - 1.6F),
+                New PointF(cxp + 3.2F, Height * 0.25F + 1.6F)})
+            ' freccia giu
+            e.Graphics.DrawLines(p, New PointF() {
+                New PointF(cxp - 3.2F, Height * 0.75F - 1.6F),
+                New PointF(cxp, Height * 0.75F + 1.6F),
+                New PointF(cxp + 3.2F, Height * 0.75F - 1.6F)})
+        End Using
+    End Sub
+End Class
+
+' ============================================================
+'  ComboBox a tema con tendina scura. Espone l'interfaccia usata dal
+'  codice: Items (AddRange), SelectedItem, SelectedIndex, DropDownStyle
+'  (ignorata), evento SelectedIndexChanged.
+' ============================================================
+Public Class ThemedComboBox
+    Inherits Control
+
+    Public ReadOnly Property Items As New List(Of Object)
+    Private _selIndex As Integer = -1
+    Private hovering As Boolean = False
+    Private dropDown As ToolStripDropDown = Nothing
+
+    Public Event SelectedIndexChanged As EventHandler
+
+    ' Compatibilita' con ComboBox: la tendina e' sempre in stile DropDownList.
+    Public Property DropDownStyle As ComboBoxStyle = ComboBoxStyle.DropDownList
+
+    Public Sub New()
+        SetStyle(ControlStyles.UserPaint Or
+                 ControlStyles.AllPaintingInWmPaint Or
+                 ControlStyles.OptimizedDoubleBuffer Or
+                 ControlStyles.ResizeRedraw Or
+                 ControlStyles.Selectable, True)
+        Height = 26
+        Cursor = Cursors.Hand
+        BackColor = UiTheme.BgField
+        ForeColor = UiTheme.Txt
+    End Sub
+
+    Public Property SelectedIndex As Integer
+        Get
+            Return _selIndex
+        End Get
+        Set(value As Integer)
+            Dim v As Integer = value
+            If v < -1 Then v = -1
+            If v >= Items.Count Then v = Items.Count - 1
+            If v <> _selIndex Then
+                _selIndex = v
+                Invalidate()
+                RaiseEvent SelectedIndexChanged(Me, EventArgs.Empty)
+            End If
+        End Set
+    End Property
+
+    Public Property SelectedItem As Object
+        Get
+            If _selIndex >= 0 AndAlso _selIndex < Items.Count Then Return Items(_selIndex)
+            Return Nothing
+        End Get
+        Set(value As Object)
+            If value Is Nothing Then
+                SelectedIndex = -1
+                Return
+            End If
+            Dim wanted As String = value.ToString()
+            For i As Integer = 0 To Items.Count - 1
+                If String.Equals(Items(i).ToString(), wanted, StringComparison.Ordinal) Then
+                    SelectedIndex = i
+                    Return
+                End If
+            Next
+        End Set
+    End Property
+
+    Protected Overrides Sub OnMouseEnter(e As EventArgs)
+        MyBase.OnMouseEnter(e)
+        hovering = True
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnMouseLeave(e As EventArgs)
+        MyBase.OnMouseLeave(e)
+        hovering = False
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnMouseDown(e As MouseEventArgs)
+        MyBase.OnMouseDown(e)
+        If Not Enabled Then Return
+        Focus()
+        OpenDropDown()
+    End Sub
+
+    Protected Overrides Sub OnKeyDown(e As KeyEventArgs)
+        MyBase.OnKeyDown(e)
+        If Not Enabled Then Return
+        If e.KeyCode = Keys.Down AndAlso e.Alt Then
+            OpenDropDown()
+            e.Handled = True
+        ElseIf e.KeyCode = Keys.Down Then
+            If _selIndex < Items.Count - 1 Then SelectedIndex = _selIndex + 1
+            e.Handled = True
+        ElseIf e.KeyCode = Keys.Up Then
+            If _selIndex > 0 Then SelectedIndex = _selIndex - 1
+            e.Handled = True
+        ElseIf e.KeyCode = Keys.Enter OrElse e.KeyCode = Keys.Space Then
+            OpenDropDown()
+            e.Handled = True
+        End If
+    End Sub
+
+    Private Sub OpenDropDown()
+        If Items.Count = 0 Then Return
+        If dropDown IsNot Nothing AndAlso dropDown.Visible Then
+            dropDown.Close()
+            Return
+        End If
+
+        Dim lst As New ListBox()
+        lst.BorderStyle = BorderStyle.None
+        lst.BackColor = UiTheme.BgField
+        lst.ForeColor = UiTheme.Txt
+        lst.Font = Font
+        lst.DrawMode = DrawMode.OwnerDrawFixed
+        lst.ItemHeight = 20
+        lst.IntegralHeight = False
+        For Each it In Items
+            lst.Items.Add(it.ToString())
+        Next
+        lst.SelectedIndex = _selIndex
+        lst.Width = Math.Max(Width - 2, 60)
+        lst.Height = Math.Min(lst.ItemHeight * Items.Count + 4, 320)
+
+        AddHandler lst.DrawItem, AddressOf List_DrawItem
+        AddHandler lst.MouseMove, Sub(s, ev)
+                                      Dim idx = lst.IndexFromPoint(ev.Location)
+                                      If idx >= 0 AndAlso idx <> lst.SelectedIndex Then lst.SelectedIndex = idx
+                                  End Sub
+        AddHandler lst.MouseUp, Sub(s, ev)
+                                    Dim idx = lst.IndexFromPoint(ev.Location)
+                                    If idx >= 0 Then
+                                        SelectedIndex = idx
+                                        dropDown.Close()
+                                    End If
+                                End Sub
+        AddHandler lst.KeyDown, Sub(s, ev)
+                                    If ev.KeyCode = Keys.Enter Then
+                                        If lst.SelectedIndex >= 0 Then SelectedIndex = lst.SelectedIndex
+                                        dropDown.Close()
+                                    ElseIf ev.KeyCode = Keys.Escape Then
+                                        dropDown.Close()
+                                    End If
+                                End Sub
+
+        Dim border As New Panel()
+        border.BackColor = UiTheme.Border
+        border.Padding = New Padding(1)
+        border.Width = lst.Width + 2
+        border.Height = lst.Height + 2
+        lst.Dock = DockStyle.Fill
+        border.Controls.Add(lst)
+
+        Dim host As New ToolStripControlHost(border)
+        host.Margin = Padding.Empty
+        host.Padding = Padding.Empty
+        host.AutoSize = False
+        host.Size = border.Size
+
+        dropDown = New ToolStripDropDown()
+        dropDown.Padding = Padding.Empty
+        dropDown.Margin = Padding.Empty
+        dropDown.AutoSize = False
+        dropDown.Size = border.Size
+        dropDown.DropShadowEnabled = True
+        dropDown.Items.Add(host)
+
+        dropDown.Show(Me, New Point(0, Height))
+        lst.Focus()
+    End Sub
+
+    Private Sub List_DrawItem(sender As Object, e As DrawItemEventArgs)
+        If e.Index < 0 Then Return
+        Dim lst = DirectCast(sender, ListBox)
+        Dim selected As Boolean = (e.State And DrawItemState.Selected) = DrawItemState.Selected
+
+        Using b As New SolidBrush(If(selected, UiTheme.BgFieldHi, UiTheme.BgField))
+            e.Graphics.FillRectangle(b, e.Bounds)
+        End Using
+        Using tb As New SolidBrush(If(selected, UiTheme.AccentHi, UiTheme.Txt))
+            e.Graphics.DrawString(lst.Items(e.Index).ToString(), lst.Font, tb,
+                                  e.Bounds.X + 6, e.Bounds.Y + 2)
+        End Using
+    End Sub
+
+    Protected Overrides Sub OnPaint(e As PaintEventArgs)
+        e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+
+        Dim parentBg As Color = If(Parent IsNot Nothing, Parent.BackColor, UiTheme.BgSidebar)
+        e.Graphics.Clear(parentBg)
+
+        Dim r As New RectangleF(0.5F, 0.5F, Width - 1.0F, Height - 1.0F)
+        Using gp = UiTheme.RoundedRect(r, 5.0F)
+            Using b As New SolidBrush(If(hovering AndAlso Enabled, UiTheme.BgFieldHi, UiTheme.BgField))
+                e.Graphics.FillPath(b, gp)
+            End Using
+            Using p As New Pen(If(hovering AndAlso Enabled, UiTheme.Accent, UiTheme.Border), 1.0F)
+                e.Graphics.DrawPath(p, gp)
+            End Using
+        End Using
+
+        Dim txt As String = If(SelectedItem Is Nothing, "", SelectedItem.ToString())
+        Dim txtCol As Color = If(Enabled, UiTheme.Txt, UiTheme.TxtDim)
+        Dim txtRect As New Rectangle(8, 0, Width - 28, Height)
+        TextRenderer.DrawText(e.Graphics, txt, Font, txtRect, txtCol,
+                              TextFormatFlags.Left Or TextFormatFlags.VerticalCenter Or TextFormatFlags.EndEllipsis)
+
+        ' Chevron
+        Dim chevCol As Color = If(Enabled, UiTheme.TxtDim, UiTheme.Border)
+        Using p As New Pen(chevCol, 1.6F)
+            p.StartCap = Drawing2D.LineCap.Round
+            p.EndCap = Drawing2D.LineCap.Round
+            Dim cxp As Single = Width - 15
+            Dim cyp As Single = Height / 2.0F - 2.0F
+            e.Graphics.DrawLines(p, New PointF() {
+                New PointF(cxp - 4.0F, cyp),
+                New PointF(cxp, cyp + 4.5F),
+                New PointF(cxp + 4.0F, cyp)})
+        End Using
+    End Sub
+End Class
+
+
+' ============================================================
+'  Scrollbar verticale a tema (thumb navy, hover chiaro, drag accento).
+'  Usata dalla sidebar al posto della scrollbar di sistema.
+' ============================================================
+Public Class ThemedVScrollBar
+    Inherits Control
+
+    Private _content As Integer = 0
+    Private _viewport As Integer = 0
+    Private _val As Integer = 0
+    Private dragging As Boolean = False
+    Private dragOffset As Integer = 0
+    Private hovering As Boolean = False
+
+    Public Event ScrollChanged As EventHandler
+
+    Public Sub New()
+        SetStyle(ControlStyles.UserPaint Or
+                 ControlStyles.AllPaintingInWmPaint Or
+                 ControlStyles.OptimizedDoubleBuffer Or
+                 ControlStyles.ResizeRedraw, True)
+        Width = 8
+        BackColor = UiTheme.BgSidebar
+        Cursor = Cursors.Hand
+    End Sub
+
+    Public Property ContentSize As Integer
+        Get
+            Return _content
+        End Get
+        Set(value As Integer)
+            _content = Math.Max(0, value)
+            ClampValue()
+            Invalidate()
+        End Set
+    End Property
+
+    Public Property ViewportSize As Integer
+        Get
+            Return _viewport
+        End Get
+        Set(value As Integer)
+            _viewport = Math.Max(0, value)
+            ClampValue()
+            Invalidate()
+        End Set
+    End Property
+
+    Public ReadOnly Property MaxScroll As Integer
+        Get
+            Return Math.Max(0, _content - _viewport)
+        End Get
+    End Property
+
+    Public Property Value As Integer
+        Get
+            Return _val
+        End Get
+        Set(value As Integer)
+            Dim v As Integer = value
+            If v < 0 Then v = 0
+            If v > MaxScroll Then v = MaxScroll
+            If v <> _val Then
+                _val = v
+                Invalidate()
+                RaiseEvent ScrollChanged(Me, EventArgs.Empty)
+            End If
+        End Set
+    End Property
+
+    Private Sub ClampValue()
+        If _val > MaxScroll Then Value = MaxScroll
+    End Sub
+
+    Private Function ThumbRect() As Rectangle
+        Dim trackH As Integer = Math.Max(0, Height - 4)
+        If _content <= 0 OrElse trackH <= 0 Then Return Rectangle.Empty
+
+        Dim th As Integer = Math.Max(24, CInt(CLng(trackH) * _viewport \ Math.Max(_content, 1)))
+        th = Math.Min(th, trackH)
+        Dim travel As Integer = trackH - th
+        Dim y As Integer = 2
+        If MaxScroll > 0 AndAlso travel > 0 Then
+            y = 2 + CInt(CLng(travel) * _val \ MaxScroll)
+        End If
+        Return New Rectangle(0, y, Width, th)
+    End Function
+
+    Protected Overrides Sub OnMouseDown(e As MouseEventArgs)
+        MyBase.OnMouseDown(e)
+        Dim tr = ThumbRect()
+        If tr.Contains(e.Location) Then
+            dragging = True
+            dragOffset = e.Y - tr.Y
+        ElseIf e.Y < tr.Y Then
+            Value = _val - _viewport
+        Else
+            Value = _val + _viewport
+        End If
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnMouseMove(e As MouseEventArgs)
+        MyBase.OnMouseMove(e)
+        If dragging Then
+            Dim tr = ThumbRect()
+            Dim trackH As Integer = Math.Max(0, Height - 4)
+            Dim travel As Integer = trackH - tr.Height
+            If travel > 0 Then
+                Dim y As Integer = e.Y - dragOffset - 2
+                Value = CInt(CLng(Math.Max(0, Math.Min(travel, y))) * MaxScroll \ travel)
+            End If
+        End If
+    End Sub
+
+    Protected Overrides Sub OnMouseUp(e As MouseEventArgs)
+        MyBase.OnMouseUp(e)
+        dragging = False
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnMouseEnter(e As EventArgs)
+        MyBase.OnMouseEnter(e)
+        hovering = True
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnMouseLeave(e As EventArgs)
+        MyBase.OnMouseLeave(e)
+        hovering = False
+        Invalidate()
+    End Sub
+
+    Protected Overrides Sub OnPaint(e As PaintEventArgs)
+        e.Graphics.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+        e.Graphics.Clear(BackColor)
+
+        Dim tr = ThumbRect()
+        If tr.IsEmpty Then Return
+
+        Dim col As Color
+        If dragging Then
+            col = UiTheme.Accent
+        ElseIf hovering Then
+            col = Color.FromArgb(74, 70, 158)
+        Else
+            col = UiTheme.Border
+        End If
+
+        Using gp = UiTheme.RoundedRect(New RectangleF(tr.X + 0.5F, tr.Y + 0.5F, tr.Width - 1.0F, tr.Height - 1.0F), 3.5F)
+            Using b As New SolidBrush(col)
+                e.Graphics.FillPath(b, gp)
+            End Using
         End Using
     End Sub
 End Class
