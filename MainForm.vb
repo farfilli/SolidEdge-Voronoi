@@ -42,7 +42,6 @@ Public Class MainForm
     Private ReadOnly lblStatusReady As New Label()
     Private ReadOnly lblStatusDot As New Label()
 
-    Private ReadOnly tips As New ToolTip()
 
     Private ReadOnly chkFill As New ThemedCheckBox()
     Private ReadOnly chkFillSymbols As New ThemedCheckBox()
@@ -58,6 +57,10 @@ Public Class MainForm
     Private ReadOnly btnExportSvg As New ThemedButton()
     Private ReadOnly btnExportDxf As New ThemedButton()
     Private ReadOnly btnExportPng As New ThemedButton()
+    Private ReadOnly btnHelp As New ThemedButton()
+    Private ReadOnly chkLightTheme As New ThemedCheckBox()
+    Private ReadOnly appTitleLbl As New Label()
+    Private helpForm As HelpForm = Nothing
     Private ReadOnly btnToSolidEdge As New ThemedButton()
 
     Private ReadOnly btnReadSketchProfile As New ThemedButton()
@@ -118,7 +121,10 @@ Public Class MainForm
         Controls.Add(statusBar)
 
         ApplyDarkTheme()
-        SetupTooltips()
+
+        If chkLightTheme.Checked Then
+            ApplyFullTheme(False)
+        End If
 
         AddHandler canvas.WorldCursorMoved, AddressOf Canvas_WorldCursorMoved
 
@@ -136,6 +142,8 @@ Public Class MainForm
         AddHandler btnExportSvg.Click, AddressOf ExportSvg_Click
         AddHandler btnExportDxf.Click, AddressOf ExportDxf_Click
         AddHandler btnExportPng.Click, AddressOf ExportPng_Click
+        AddHandler btnHelp.Click, AddressOf ShowHelp_Click
+        AddHandler chkLightTheme.CheckedChanged, AddressOf ThemeToggle_Changed
         AddHandler btnToSolidEdge.Click, AddressOf ExportToSolidEdge_Click
 
         AddHandler chkFill.CheckedChanged, AddressOf RefreshCanvasOptions
@@ -201,17 +209,15 @@ Public Class MainForm
         AddHandler sideScroll.ScrollChanged, Sub(s, ev) sideLayout.Top = -sideScroll.Value
 
         ' Titolo app
-        Dim appTitle As New Label With {
-            .Text = "SE-VORONOI",
-            .ForeColor = UiTheme.Accent,
-            .Font = New Font("Segoe UI", 10.0F, FontStyle.Bold),
-            .AutoSize = False,
-            .Width = 238,
-            .Height = 26,
-            .Margin = New Padding(3, 4, 3, 2),
-            .TextAlign = ContentAlignment.MiddleLeft
-        }
-        sideLayout.Controls.Add(appTitle)
+        appTitleLbl.Text = "SE-VORONOI"
+        appTitleLbl.ForeColor = UiTheme.Accent
+        appTitleLbl.Font = New Font("Segoe UI", 10.0F, FontStyle.Bold)
+        appTitleLbl.AutoSize = False
+        appTitleLbl.Width = 238
+        appTitleLbl.Height = 26
+        appTitleLbl.Margin = New Padding(3, 4, 3, 2)
+        appTitleLbl.TextAlign = ContentAlignment.MiddleLeft
+        sideLayout.Controls.Add(appTitleLbl)
 
         ' ===== GENERATION =====
         curSection = NewSection("GENERATION", True)
@@ -258,6 +264,18 @@ Public Class MainForm
         AddRowControl(btnExportPng, 30)
         AddRowControl(chkExportAsBlocks, 22)
         AddRowControl(btnToSolidEdge, 32)
+
+        ' Toggle tema + Help in fondo alla sidebar
+        chkLightTheme.Text = "Light theme"
+        chkLightTheme.Width = 244
+        chkLightTheme.Height = 22
+        chkLightTheme.Margin = New Padding(3, 12, 0, 2)
+        sideLayout.Controls.Add(chkLightTheme)
+
+        btnHelp.Width = 244
+        btnHelp.Height = 28
+        btnHelp.Margin = New Padding(0, 2, 0, 6)
+        sideLayout.Controls.Add(btnHelp)
     End Sub
 
     Private Function NewSection(title As String, startOpen As Boolean) As CollapsibleSection
@@ -282,11 +300,12 @@ Public Class MainForm
         End If
     End Sub
 
-    ' Rotella del mouse sopra la sidebar -> scorre la scrollbar custom.
+    ' Rotella del mouse sopra la sidebar: se il cursore e' su un controllo che
+    ' la gestisce (combo, slider, campo numerico) la inoltra a lui, altrimenti
+    ' scorre la sidebar. In ogni caso la consuma (non deve arrivare al canvas).
     Public Function PreFilterMessage(ByRef m As Message) As Boolean Implements IMessageFilter.PreFilterMessage
         Const WM_MOUSEWHEEL As Integer = &H20A
         If m.Msg <> WM_MOUSEWHEEL Then Return False
-        If Not sideScroll.Visible Then Return False
 
         Dim pos As Point = Control.MousePosition
         If Not sidebar.RectangleToScreen(sidebar.ClientRectangle).Contains(pos) Then Return False
@@ -296,7 +315,35 @@ Public Class MainForm
         Dim raw As Integer = CInt((m.WParam.ToInt64() >> 16) And &HFFFF&)
         If raw >= &H8000 Then raw -= &H10000
         Dim delta As Integer = raw
-        sideScroll.Value -= Math.Sign(delta) * 60
+
+        ' Trova il controllo piu' profondo sotto il cursore.
+        Dim ctl As Control = sidebar
+        Do
+            Dim child = ctl.GetChildAtPoint(ctl.PointToClient(pos), GetChildAtPointSkip.Invisible)
+            If child Is Nothing Then Exit Do
+            ctl = child
+        Loop
+
+        ' Se e' (o sta dentro) un controllo che gestisce la rotella, inoltra.
+        Dim cur As Control = ctl
+        While cur IsNot Nothing AndAlso cur IsNot sidebar
+            If TypeOf cur Is ThemedComboBox Then
+                DirectCast(cur, ThemedComboBox).PerformWheel(delta)
+                Return True
+            ElseIf TypeOf cur Is ThemedSlider Then
+                DirectCast(cur, ThemedSlider).PerformWheel(delta)
+                Return True
+            ElseIf TypeOf cur Is ThemedNumericUpDown Then
+                DirectCast(cur, ThemedNumericUpDown).PerformWheel(delta)
+                Return True
+            End If
+            cur = cur.Parent
+        End While
+
+        ' Altrimenti scorre la sidebar (se la barra e' visibile).
+        If sideScroll.Visible Then
+            sideScroll.Value -= Math.Sign(delta) * 60
+        End If
         Return True
     End Function
 
@@ -315,10 +362,69 @@ Public Class MainForm
         StyleButton(btnExportSvg, False)
         StyleButton(btnExportDxf, False)
         StyleButton(btnExportPng, False)
+        StyleButton(btnHelp, False)
 
-        For Each chk In New CheckBox() {chkFill, chkFillSymbols, chkOuter, chkSeeds, chkInner, chkRandomRotation, chkExportAsBlocks}
+        For Each chk In New CheckBox() {chkFill, chkFillSymbols, chkOuter, chkSeeds, chkInner, chkRandomRotation, chkExportAsBlocks, chkLightTheme}
             chk.ForeColor = UiTheme.Txt
             chk.BackColor = UiTheme.BgSidebar
+        Next
+    End Sub
+
+    Private Sub ThemeToggle_Changed(sender As Object, e As EventArgs)
+        ApplyFullTheme(Not chkLightTheme.Checked)
+    End Sub
+
+    ' Commuta la palette e riapplica i colori a tutta la UI costruita.
+    ' Il canvas resta navy in entrambi i temi (superficie di disegno).
+    Private Sub ApplyFullTheme(dark As Boolean)
+        UiTheme.SetTheme(dark)
+
+        BackColor = UiTheme.BgCanvas
+        canvas.BackColor = UiTheme.BgCanvas
+
+        sidebar.BackColor = UiTheme.BgSidebar
+        sideViewport.BackColor = UiTheme.BgSidebar
+        sideLayout.BackColor = UiTheme.BgSidebar
+
+        RethemeControlTree(sidebar)
+
+        appTitleLbl.ForeColor = UiTheme.Accent
+
+        statusBar.BackColor = UiTheme.StatusBg
+        lblStatusInfo.ForeColor = UiTheme.Txt
+        lblStatusCoords.ForeColor = UiTheme.TxtDim
+        lblStatusReady.ForeColor = UiTheme.Txt
+
+        ' Pulsanti, checkbox e stili derivati.
+        ApplyDarkTheme()
+
+        If IsHandleCreated Then
+            UiTheme.ApplyTitleBarTheme(Handle)
+        End If
+
+        canvas.Invalidate()
+        Refresh()
+    End Sub
+
+    ' Riapplica ricorsivamente i colori base del tema all'albero della sidebar.
+    ' I figli vengono trattati prima del padre, cosi' i tipi compositi
+    ' (sezioni) possono correggere per ultimi i propri elementi (header).
+    Private Sub RethemeControlTree(root As Control)
+        For Each c As Control In root.Controls
+            RethemeControlTree(c)
+
+            If TypeOf c Is CollapsibleSection Then
+                DirectCast(c, CollapsibleSection).RefreshTheme()
+            ElseIf TypeOf c Is ThemedNumericUpDown Then
+                DirectCast(c, ThemedNumericUpDown).RefreshTheme()
+            ElseIf TypeOf c Is ThemedSlider OrElse TypeOf c Is ThemedVScrollBar Then
+                c.BackColor = UiTheme.BgSidebar
+            ElseIf TypeOf c Is Label Then
+                c.ForeColor = UiTheme.TxtDim
+                c.BackColor = UiTheme.BgSidebar
+            ElseIf TypeOf c Is TableLayoutPanel OrElse TypeOf c Is FlowLayoutPanel OrElse TypeOf c Is Panel Then
+                c.BackColor = UiTheme.BgSidebar
+            End If
         Next
     End Sub
 
@@ -413,58 +519,13 @@ Public Class MainForm
         lblStatusCoords.Location = New Point(lblStatusInfo.Right + 30, 6)
     End Sub
 
-    ' ===== Tooltips =====
-
-    Private Sub SetupTooltips()
-        tips.AutoPopDelay = 8000
-        tips.InitialDelay = 500
-        tips.SetToolTip(numRelax, "Lloyd relaxation iterations: evens out cell sizes")
-        tips.SetToolTip(cmbSeedMode, "Seed distribution inside the domain")
-        tips.SetToolTip(numInnerOffset, "Distance of the inner curve from the cell border")
-        tips.SetToolTip(numCellScale, "Global symbol scale (mouse wheel on the canvas for a single cell)")
-        tips.SetToolTip(canvas, "Wheel: scale symbol" & ChrW(10) &
-                                "Shift+Wheel: rotate symbol" & ChrW(10) &
-                                "CTRL+Wheel: cycle symbol/block" & ChrW(10) &
-                                "Double click: add seed  -  Right click: remove seed" & ChrW(10) &
-                                "CTRL+Right drag: zoom  -  CTRL+Shift+Right drag: pan" & ChrW(10) &
-                                "ALT+Right click: reset view")
-    End Sub
 
     ' ===== Chrome scuro (titolo finestra + scrollbar) =====
 
-    <Runtime.InteropServices.DllImport("dwmapi.dll")>
-    Private Shared Function DwmSetWindowAttribute(hwnd As IntPtr, attr As Integer, ByRef attrValue As Integer, attrSize As Integer) As Integer
-    End Function
-
-    <Runtime.InteropServices.DllImport("uxtheme.dll", CharSet:=Runtime.InteropServices.CharSet.Unicode)>
-    Private Shared Function SetWindowTheme(hWnd As IntPtr, pszSubAppName As String, pszSubIdList As String) As Integer
-    End Function
-
     Protected Overrides Sub OnLoad(e As EventArgs)
         MyBase.OnLoad(e)
-        Try
-            ' Barra del titolo scura (Windows 10 1809+ / 11); attr 20, fallback 19.
-            Dim dark As Integer = 1
-            If DwmSetWindowAttribute(Handle, 20, dark, 4) <> 0 Then
-                DwmSetWindowAttribute(Handle, 19, dark, 4)
-            End If
-
-            ' Windows 11: colori personalizzati di caption, bordo e testo (COLORREF 0x00BBGGRR).
-            ' Su Windows 10 le chiamate falliscono e resta il dark generico: va bene.
-            Dim captionCol As Integer = ColRef(UiTheme.BgSidebar)
-            Dim borderCol As Integer = ColRef(UiTheme.BgSidebar)
-            Dim textCol As Integer = ColRef(UiTheme.Txt)
-            DwmSetWindowAttribute(Handle, 35, captionCol, 4)   ' DWMWA_CAPTION_COLOR
-            DwmSetWindowAttribute(Handle, 34, borderCol, 4)    ' DWMWA_BORDER_COLOR
-            DwmSetWindowAttribute(Handle, 36, textCol, 4)      ' DWMWA_TEXT_COLOR
-        Catch
-            ' Sistemi senza supporto: si ignora, resta il chrome standard.
-        End Try
+        UiTheme.ApplyTitleBarTheme(Handle)
     End Sub
-
-    Private Shared Function ColRef(c As Color) As Integer
-        Return c.R Or (CInt(c.G) << 8) Or (CInt(c.B) << 16)
-    End Function
 
     Protected Overrides Sub OnFormClosed(e As FormClosedEventArgs)
         SaveUserSettings()
@@ -503,7 +564,8 @@ Public Class MainForm
                 "ShowOuter=" & chkOuter.Checked.ToString(),
                 "ShowSeeds=" & chkSeeds.Checked.ToString(),
                 "ShowInner=" & chkInner.Checked.ToString(),
-                "ExportAsBlocks=" & chkExportAsBlocks.Checked.ToString()
+                "ExportAsBlocks=" & chkExportAsBlocks.Checked.ToString(),
+                "LightTheme=" & chkLightTheme.Checked.ToString()
             }
             File.WriteAllLines(SettingsPath(), lines)
         Catch
@@ -549,6 +611,7 @@ Public Class MainForm
             If map.TryGetValue("ShowSeeds", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkSeeds.Checked = bVal
             If map.TryGetValue("ShowInner", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkInner.Checked = bVal
             If map.TryGetValue("ExportAsBlocks", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkExportAsBlocks.Checked = bVal
+            If map.TryGetValue("LightTheme", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkLightTheme.Checked = bVal
 
         Catch
             ' File assente o corrotto: si parte con i default.
@@ -689,7 +752,7 @@ Public Class MainForm
         numInnerOffset.Value = 0D
 
         numVertexTrim.Minimum = 0D
-        numVertexTrim.Maximum = 2D
+        numVertexTrim.Maximum = 1D
         numVertexTrim.DecimalPlaces = 2
         numVertexTrim.Increment = 0.05D
         numVertexTrim.Value = 0.22D
@@ -792,6 +855,7 @@ Public Class MainForm
 
         btnExportDxf.Text = "Export DXF"
         btnExportPng.Text = "Export PNG"
+        btnHelp.Text = "Help"
         btnExportDxf.UseVisualStyleBackColor = False
         btnExportDxf.BackColor = Color.White
         btnExportDxf.ForeColor = Color.FromArgb(30, 40, 55)
@@ -1749,6 +1813,16 @@ Public Class MainForm
         End Try
     End Sub
 
+    Private Sub ShowHelp_Click(sender As Object, e As EventArgs)
+        If helpForm Is Nothing OrElse helpForm.IsDisposed Then
+            helpForm = New HelpForm()
+            helpForm.Show(Me)
+        Else
+            helpForm.BringToFront()
+            helpForm.Focus()
+        End If
+    End Sub
+
     Private Sub ExportToSolidEdge_Click(sender As Object, e As EventArgs)
         Try
             If chkExportAsBlocks.Checked Then
@@ -2138,16 +2212,66 @@ Public NotInheritable Class UiTheme
     Private Sub New()
     End Sub
 
-    Public Shared ReadOnly BgCanvas As Color = Color.FromArgb(8, 6, 53)
-    Public Shared ReadOnly BgSidebar As Color = Color.FromArgb(16, 14, 60)
-    Public Shared ReadOnly BgField As Color = Color.FromArgb(22, 20, 74)
-    Public Shared ReadOnly BgFieldHi As Color = Color.FromArgb(30, 28, 94)
-    Public Shared ReadOnly Border As Color = Color.FromArgb(42, 40, 112)
-    Public Shared ReadOnly Txt As Color = Color.FromArgb(232, 236, 248)
-    Public Shared ReadOnly TxtDim As Color = Color.FromArgb(154, 160, 200)
-    Public Shared ReadOnly Accent As Color = Color.FromArgb(0, 188, 212)
-    Public Shared ReadOnly AccentHi As Color = Color.FromArgb(110, 231, 243)
-    Public Shared ReadOnly StatusBg As Color = Color.FromArgb(13, 11, 69)
+    Public Shared IsDark As Boolean = True
+
+    ' Il canvas resta navy in entrambi i temi: e' la superficie di disegno
+    ' e la palette delle celle e' tarata su di esso.
+    Public Shared BgCanvas As Color = Color.FromArgb(8, 6, 53)
+    Public Shared BgSidebar As Color = Color.FromArgb(16, 14, 60)
+    Public Shared BgField As Color = Color.FromArgb(22, 20, 74)
+    Public Shared BgFieldHi As Color = Color.FromArgb(30, 28, 94)
+    Public Shared Border As Color = Color.FromArgb(42, 40, 112)
+    Public Shared Txt As Color = Color.FromArgb(232, 236, 248)
+    Public Shared TxtDim As Color = Color.FromArgb(154, 160, 200)
+    Public Shared Accent As Color = Color.FromArgb(0, 188, 212)
+    Public Shared AccentHi As Color = Color.FromArgb(110, 231, 243)
+    Public Shared StatusBg As Color = Color.FromArgb(13, 11, 69)
+
+    Public Shared Sub SetTheme(dark As Boolean)
+        IsDark = dark
+
+        If dark Then
+            BgSidebar = Color.FromArgb(16, 14, 60)
+            BgField = Color.FromArgb(22, 20, 74)
+            BgFieldHi = Color.FromArgb(30, 28, 94)
+            Border = Color.FromArgb(42, 40, 112)
+            Txt = Color.FromArgb(232, 236, 248)
+            TxtDim = Color.FromArgb(154, 160, 200)
+            Accent = Color.FromArgb(0, 188, 212)
+            AccentHi = Color.FromArgb(110, 231, 243)
+            StatusBg = Color.FromArgb(13, 11, 69)
+        Else
+            BgSidebar = Color.FromArgb(238, 241, 246)
+            BgField = Color.FromArgb(255, 255, 255)
+            BgFieldHi = Color.FromArgb(222, 230, 240)
+            Border = Color.FromArgb(178, 186, 206)
+            Txt = Color.FromArgb(30, 40, 55)
+            TxtDim = Color.FromArgb(106, 116, 140)
+            Accent = Color.FromArgb(0, 151, 167)
+            AccentHi = Color.FromArgb(0, 188, 212)
+            StatusBg = Color.FromArgb(226, 230, 238)
+        End If
+    End Sub
+
+    <Runtime.InteropServices.DllImport("dwmapi.dll")>
+    Private Shared Function DwmSetAttr(hwnd As IntPtr, attr As Integer, ByRef attrValue As Integer, attrSize As Integer) As Integer
+    End Function
+
+    ' Applica alla barra del titolo i colori del tema corrente (Win10 1809+/11).
+    Public Shared Sub ApplyTitleBarTheme(handle As IntPtr)
+        Try
+            Dim dark As Integer = If(IsDark, 1, 0)
+            If DwmSetAttr(handle, 20, dark, 4) <> 0 Then
+                DwmSetAttr(handle, 19, dark, 4)
+            End If
+            Dim captionCol As Integer = BgSidebar.R Or (CInt(BgSidebar.G) << 8) Or (CInt(BgSidebar.B) << 16)
+            Dim textCol As Integer = Txt.R Or (CInt(Txt.G) << 8) Or (CInt(Txt.B) << 16)
+            DwmSetAttr(handle, 35, captionCol, 4)
+            DwmSetAttr(handle, 34, captionCol, 4)
+            DwmSetAttr(handle, 36, textCol, 4)
+        Catch
+        End Try
+    End Sub
 
     Public Shared Function RoundedRect(r As RectangleF, radius As Single) As Drawing2D.GraphicsPath
         Dim gp As New Drawing2D.GraphicsPath()
@@ -2290,8 +2414,13 @@ Public Class ThemedSlider
 
     Protected Overrides Sub OnMouseWheel(e As MouseEventArgs)
         MyBase.OnMouseWheel(e)
+        PerformWheel(e.Delta)
+    End Sub
+
+    ' Rotella inoltrata dal message filter quando il cursore e' sopra il controllo.
+    Public Sub PerformWheel(delta As Integer)
         If Not Enabled Then Return
-        Me.Value = _val + If(e.Delta > 0, _inc, -_inc)
+        Me.Value = _val + If(delta > 0, _inc, -_inc)
     End Sub
 
     Protected Overrides Sub OnKeyDown(e As KeyEventArgs)
@@ -2440,9 +2569,18 @@ Public Class CollapsibleSection
 
     Private Sub Header_Paint(sender As Object, e As PaintEventArgs)
         ' Sottile linea separatrice sopra l'header.
-        Using p As New Pen(Color.FromArgb(35, 32, 100), 1.0F)
+        Using p As New Pen(UiTheme.Border, 1.0F)
             e.Graphics.DrawLine(p, 0, 0, headerLbl.Width, 0)
         End Using
+    End Sub
+
+    ' Riapplica i colori del tema corrente (usato dal toggle dark/light).
+    Public Sub RefreshTheme()
+        BackColor = UiTheme.BgSidebar
+        headerLbl.BackColor = UiTheme.BgSidebar
+        Content.BackColor = UiTheme.BgSidebar
+        UpdateHeader()
+        Invalidate(True)
     End Sub
 End Class
 
@@ -2756,6 +2894,14 @@ Public Class ThemedNumericUpDown
         Invalidate()
     End Sub
 
+    ' Riapplica i colori del tema corrente alla TextBox interna.
+    Public Sub RefreshTheme()
+        BackColor = UiTheme.BgField
+        box.BackColor = UiTheme.BgField
+        box.ForeColor = If(Enabled, UiTheme.Txt, UiTheme.TxtDim)
+        Invalidate()
+    End Sub
+
     Protected Overrides Sub OnMouseMove(e As MouseEventArgs)
         MyBase.OnMouseMove(e)
         Dim z As Integer = 0
@@ -2791,8 +2937,14 @@ Public Class ThemedNumericUpDown
 
     Protected Overrides Sub OnMouseWheel(e As MouseEventArgs)
         MyBase.OnMouseWheel(e)
+        PerformWheel(e.Delta)
+    End Sub
+
+    ' Rotella inoltrata dal message filter quando il cursore e' sopra il controllo.
+    Public Sub PerformWheel(delta As Integer)
         If Not Enabled Then Return
-        Me.Value = _val + If(e.Delta > 0, _inc, -_inc)
+        CommitText()
+        Me.Value = _val + If(delta > 0, _inc, -_inc)
     End Sub
 
     Protected Overrides Sub OnPaint(e As PaintEventArgs)
@@ -2926,6 +3078,25 @@ Public Class ThemedComboBox
         If Not Enabled Then Return
         Focus()
         OpenDropDown()
+    End Sub
+
+    Protected Overrides Sub OnMouseWheel(e As MouseEventArgs)
+        MyBase.OnMouseWheel(e)
+        PerformWheel(e.Delta)
+    End Sub
+
+    ' Rotella (diretta o inoltrata dal message filter): scorre le voci.
+    Public Sub PerformWheel(delta As Integer)
+        If Not Enabled OrElse Items.Count = 0 Then Return
+        If delta > 0 Then
+            If _selIndex > 0 Then
+                SelectedIndex = _selIndex - 1
+            ElseIf _selIndex < 0 Then
+                SelectedIndex = 0
+            End If
+        Else
+            If _selIndex < Items.Count - 1 Then SelectedIndex = _selIndex + 1
+        End If
     End Sub
 
     Protected Overrides Sub OnKeyDown(e As KeyEventArgs)
@@ -3223,5 +3394,143 @@ Public Class ThemedVScrollBar
                 e.Graphics.FillPath(b, gp)
             End Using
         End Using
+    End Sub
+End Class
+
+
+' ============================================================
+'  Finestra di aiuto: comandi del mouse e descrizione dei controlli.
+' ============================================================
+Public Class HelpForm
+    Inherits Form
+
+    Public Sub New()
+        Text = "SE-Voronoi - Help"
+        StartPosition = FormStartPosition.CenterParent
+        Width = 640
+        Height = 720
+        MinimumSize = New Size(480, 400)
+        BackColor = UiTheme.BgSidebar
+        Font = New Font("Segoe UI", 9.0F)
+
+        Try
+            Icon = My.Resources.SE_Voronoi
+        Catch
+        End Try
+
+        Dim host As New Panel With {
+            .Dock = DockStyle.Fill,
+            .Padding = New Padding(16, 12, 16, 12),
+            .BackColor = UiTheme.BgSidebar
+        }
+
+        Dim rtb As New RichTextBox With {
+            .Dock = DockStyle.Fill,
+            .ReadOnly = True,
+            .BorderStyle = BorderStyle.None,
+            .BackColor = UiTheme.BgSidebar,
+            .ForeColor = UiTheme.Txt,
+            .DetectUrls = False,
+            .TabStop = False
+        }
+
+        host.Controls.Add(rtb)
+        Controls.Add(host)
+
+        BuildContent(rtb)
+        rtb.SelectionStart = 0
+        rtb.SelectionLength = 0
+    End Sub
+
+    Protected Overrides Sub OnLoad(e As EventArgs)
+        MyBase.OnLoad(e)
+        UiTheme.ApplyTitleBarTheme(Handle)
+    End Sub
+
+    Private Sub Heading(rtb As RichTextBox, text As String)
+        rtb.SelectionFont = New Font("Segoe UI", 10.0F, FontStyle.Bold)
+        rtb.SelectionColor = UiTheme.Accent
+        rtb.AppendText(text & Environment.NewLine)
+    End Sub
+
+    Private Sub Item(rtb As RichTextBox, keys As String, desc As String)
+        rtb.SelectionFont = New Font("Segoe UI", 9.0F, FontStyle.Bold)
+        rtb.SelectionColor = UiTheme.Txt
+        rtb.AppendText("  " & keys)
+        rtb.SelectionFont = New Font("Segoe UI", 9.0F)
+        rtb.SelectionColor = UiTheme.TxtDim
+        rtb.AppendText("  -  " & desc & Environment.NewLine)
+    End Sub
+
+    Private Sub Gap(rtb As RichTextBox)
+        rtb.SelectionFont = New Font("Segoe UI", 4.0F)
+        rtb.AppendText(Environment.NewLine)
+    End Sub
+
+    Private Sub BuildContent(rtb As RichTextBox)
+        Heading(rtb, "MOUSE - CANVAS")
+        Item(rtb, "Left drag on a seed", "move the seed (diagram rebuilds live)")
+        Item(rtb, "Ctrl+Left click / Double click", "add a seed at the cursor")
+        Item(rtb, "Right click on a seed", "remove the seed")
+        Item(rtb, "Wheel over a cell", "scale that cell's symbol/block")
+        Item(rtb, "Shift+Wheel", "rotate that cell's symbol/block")
+        Item(rtb, "Ctrl+Wheel", "cycle to the next/previous symbol or block (per cell, persistent)")
+        Item(rtb, "Ctrl+Right drag", "zoom, Solid Edge style: forward = zoom out, backward = zoom in; anchored at the cursor")
+        Item(rtb, "Ctrl+Shift+Right drag", "pan; press/release Shift during the drag to switch between zoom and pan")
+        Item(rtb, "Alt+Right click", "reset the view (fit to domain)")
+        Gap(rtb)
+
+        Heading(rtb, "MOUSE - SIDEBAR")
+        Item(rtb, "Wheel over a combo box", "change the selected value")
+        Item(rtb, "Wheel over a slider / numeric field", "adjust the value")
+        Item(rtb, "Wheel elsewhere", "scroll the sidebar (when the scrollbar is visible)")
+        Item(rtb, "Click a section header", "collapse / expand the section")
+        Gap(rtb)
+
+        Heading(rtb, "GENERATION")
+        Item(rtb, "Seed Placement", "seed distribution: Random; RandomNearBorders / RandomFarBorders (weighted); CircularGrid (concentric rings); RectangularGrid and Staggered (odd rows shifted half a step)")
+        Item(rtb, "Cell Count", "requested number of seeds (grid patterns approximate it)")
+        Item(rtb, "Random Seed", "generator seed: the same number reproduces the same pattern")
+        Item(rtb, "Relax", "Lloyd relaxation iterations, evens out cell sizes (0 keeps patterns exact)")
+        Item(rtb, "Cell Scale", "global symbol size relative to each cell")
+        Item(rtb, "Generate / New Seed", "rebuild the diagram; New Seed increments Random Seed first")
+        Gap(rtb)
+
+        Heading(rtb, "STYLE")
+        Item(rtb, "Cell Style", "Straight or Curved cells, fixed symbols, Random (stable per cell) or BlockSymbol (uses the blocks in memory)")
+        Item(rtb, "Vertex Mode", "inner-curve corners: Sharp corner, Arc fillet or Spline curve")
+        Item(rtb, "Vertex Size", "amount of corner trimming")
+        Item(rtb, "Inner Offset", "inset of the inner curve from the cell borders")
+        Item(rtb, "Curve Width", "stroke width (canvas, exports and block previews)")
+        Item(rtb, "Fill cells", "translucent background of each cell")
+        Item(rtb, "Fill symbols", "even-odd fill of symbols/blocks: nested profiles become holes")
+        Item(rtb, "Random symbol rotation", "stable random rotation per cell")
+        Gap(rtb)
+
+        Heading(rtb, "DISPLAY")
+        Item(rtb, "Show outer edges / seeds / inner curve", "visibility toggles; they also affect PNG export")
+        Gap(rtb)
+
+        Heading(rtb, "SKETCH & BLOCKS")
+        Item(rtb, "Read Sketch Profile", "reads the active Solid Edge sketch as the generation domain (holes supported)")
+        Item(rtb, "Read SE Blocks", "imports block definitions from the document (additive, deduplicated by name)")
+        Item(rtb, "Load / Save Blocks", "block library files (.sevb); Clear Blocks empties the memory")
+        Item(rtb, "Block Library", "preview gallery of loaded blocks, with per-block removal")
+        Gap(rtb)
+
+        Heading(rtb, "EXPORT")
+        Item(rtb, "Export SVG / DXF", "vector output of the current geometry")
+        Item(rtb, "Export PNG", "2000 px image of the whole domain (ignores zoom/pan)")
+        Item(rtb, "To SE as blocks", "emits block occurrences instead of raw geometry")
+        Item(rtb, "To Solid Edge", "draws into the active sketch (missing block definitions are created)")
+        Gap(rtb)
+
+        Heading(rtb, "STATUS BAR")
+        Item(rtb, "Left side", "cells, seeds, active domain, blocks in memory and cursor world coordinates")
+        Gap(rtb)
+
+        Heading(rtb, "GENERAL")
+        Item(rtb, "Light theme", "switches the interface between dark and light palettes (the canvas stays dark: the cell colors are designed for it); remembered across sessions")
+        Item(rtb, "Help", "opens this window")
     End Sub
 End Class
