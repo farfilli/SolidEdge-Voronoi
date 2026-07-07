@@ -57,6 +57,7 @@ Public Class MainForm
 
     Private ReadOnly btnExportSvg As New ThemedButton()
     Private ReadOnly btnExportDxf As New ThemedButton()
+    Private ReadOnly btnExportPng As New ThemedButton()
     Private ReadOnly btnToSolidEdge As New ThemedButton()
 
     Private ReadOnly btnReadSketchProfile As New ThemedButton()
@@ -103,6 +104,7 @@ Public Class MainForm
         BackColor = UiTheme.BgCanvas
 
         ConfigureControls()
+        LoadUserSettings()
         BuildSidebar()
         BuildStatusBar()
 
@@ -133,6 +135,7 @@ Public Class MainForm
 
         AddHandler btnExportSvg.Click, AddressOf ExportSvg_Click
         AddHandler btnExportDxf.Click, AddressOf ExportDxf_Click
+        AddHandler btnExportPng.Click, AddressOf ExportPng_Click
         AddHandler btnToSolidEdge.Click, AddressOf ExportToSolidEdge_Click
 
         AddHandler chkFill.CheckedChanged, AddressOf RefreshCanvasOptions
@@ -252,6 +255,7 @@ Public Class MainForm
         curSection = NewSection("EXPORT", True)
         AddRowControl(btnExportSvg, 30)
         AddRowControl(btnExportDxf, 30)
+        AddRowControl(btnExportPng, 30)
         AddRowControl(chkExportAsBlocks, 22)
         AddRowControl(btnToSolidEdge, 32)
     End Sub
@@ -310,6 +314,7 @@ Public Class MainForm
         StyleButton(btnBlockLibrary, False)
         StyleButton(btnExportSvg, False)
         StyleButton(btnExportDxf, False)
+        StyleButton(btnExportPng, False)
 
         For Each chk In New CheckBox() {chkFill, chkFillSymbols, chkOuter, chkSeeds, chkInner, chkRandomRotation, chkExportAsBlocks}
             chk.ForeColor = UiTheme.Txt
@@ -420,7 +425,9 @@ Public Class MainForm
         tips.SetToolTip(canvas, "Wheel: scale symbol" & ChrW(10) &
                                 "Shift+Wheel: rotate symbol" & ChrW(10) &
                                 "CTRL+Wheel: cycle symbol/block" & ChrW(10) &
-                                "Double click: add seed  -  Right click: remove seed")
+                                "Double click: add seed  -  Right click: remove seed" & ChrW(10) &
+                                "CTRL+Right drag: zoom  -  CTRL+Shift+Right drag: pan" & ChrW(10) &
+                                "ALT+Right click: reset view")
     End Sub
 
     ' ===== Chrome scuro (titolo finestra + scrollbar) =====
@@ -460,8 +467,92 @@ Public Class MainForm
     End Function
 
     Protected Overrides Sub OnFormClosed(e As FormClosedEventArgs)
+        SaveUserSettings()
         Application.RemoveMessageFilter(Me)
         MyBase.OnFormClosed(e)
+    End Sub
+
+    ' ===== Persistenza impostazioni utente (%AppData%\SE-Voronoi\settings.txt) =====
+
+    Private Function SettingsPath() As String
+        Dim dir As String = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SE-Voronoi")
+        Directory.CreateDirectory(dir)
+        Return Path.Combine(dir, "settings.txt")
+    End Function
+
+    Private Function FInv(v As Decimal) As String
+        Return v.ToString(Globalization.CultureInfo.InvariantCulture)
+    End Function
+
+    Private Sub SaveUserSettings()
+        Try
+            Dim lines As New List(Of String) From {
+                "CellStyle=" & If(cmbStyle.SelectedItem Is Nothing, "", cmbStyle.SelectedItem.ToString()),
+                "SeedMode=" & If(cmbSeedMode.SelectedItem Is Nothing, "", cmbSeedMode.SelectedItem.ToString()),
+                "VertexModeIndex=" & cmbVertexMode.SelectedIndex.ToString(Globalization.CultureInfo.InvariantCulture),
+                "CellCount=" & FInv(numCells.Value),
+                "RandomSeed=" & FInv(numSeed.Value),
+                "Relax=" & FInv(numRelax.Value),
+                "CellScale=" & FInv(numCellScale.Value),
+                "InnerOffset=" & FInv(numInnerOffset.Value),
+                "VertexTrim=" & FInv(numVertexTrim.Value),
+                "CurveWidth=" & FInv(numCurveWidth.Value),
+                "FillCells=" & chkFill.Checked.ToString(),
+                "FillSymbols=" & chkFillSymbols.Checked.ToString(),
+                "RandomRotation=" & chkRandomRotation.Checked.ToString(),
+                "ShowOuter=" & chkOuter.Checked.ToString(),
+                "ShowSeeds=" & chkSeeds.Checked.ToString(),
+                "ShowInner=" & chkInner.Checked.ToString(),
+                "ExportAsBlocks=" & chkExportAsBlocks.Checked.ToString()
+            }
+            File.WriteAllLines(SettingsPath(), lines)
+        Catch
+            ' Il salvataggio delle preferenze non deve mai bloccare la chiusura.
+        End Try
+    End Sub
+
+    Private Sub LoadUserSettings()
+        Try
+            Dim p As String = SettingsPath()
+            If Not File.Exists(p) Then Return
+
+            Dim map As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
+            For Each ln In File.ReadAllLines(p)
+                Dim k As Integer = ln.IndexOf("="c)
+                If k > 0 Then map(ln.Substring(0, k).Trim()) = ln.Substring(k + 1).Trim()
+            Next
+
+            Dim sVal As String = Nothing
+
+            If map.TryGetValue("CellStyle", sVal) Then cmbStyle.SelectedItem = sVal
+            If map.TryGetValue("SeedMode", sVal) Then cmbSeedMode.SelectedItem = sVal
+
+            Dim iVal As Integer
+            If map.TryGetValue("VertexModeIndex", sVal) AndAlso Integer.TryParse(sVal, iVal) Then
+                cmbVertexMode.SelectedIndex = iVal
+            End If
+
+            Dim dVal As Decimal
+            If map.TryGetValue("CellCount", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numCells.Value = dVal
+            If map.TryGetValue("RandomSeed", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numSeed.Value = dVal
+            If map.TryGetValue("Relax", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numRelax.Value = dVal
+            If map.TryGetValue("CellScale", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numCellScale.Value = dVal
+            If map.TryGetValue("InnerOffset", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numInnerOffset.Value = dVal
+            If map.TryGetValue("VertexTrim", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numVertexTrim.Value = dVal
+            If map.TryGetValue("CurveWidth", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numCurveWidth.Value = dVal
+
+            Dim bVal As Boolean
+            If map.TryGetValue("FillCells", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkFill.Checked = bVal
+            If map.TryGetValue("FillSymbols", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkFillSymbols.Checked = bVal
+            If map.TryGetValue("RandomRotation", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkRandomRotation.Checked = bVal
+            If map.TryGetValue("ShowOuter", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkOuter.Checked = bVal
+            If map.TryGetValue("ShowSeeds", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkSeeds.Checked = bVal
+            If map.TryGetValue("ShowInner", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkInner.Checked = bVal
+            If map.TryGetValue("ExportAsBlocks", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkExportAsBlocks.Checked = bVal
+
+        Catch
+            ' File assente o corrotto: si parte con i default.
+        End Try
     End Sub
 
     Private Sub AddRowTitle(text As String)
@@ -700,6 +791,7 @@ Public Class MainForm
         btnExportSvg.FlatStyle = FlatStyle.Flat
 
         btnExportDxf.Text = "Export DXF"
+        btnExportPng.Text = "Export PNG"
         btnExportDxf.UseVisualStyleBackColor = False
         btnExportDxf.BackColor = Color.White
         btnExportDxf.ForeColor = Color.FromArgb(30, 40, 55)
@@ -1253,6 +1345,7 @@ Public Class MainForm
 
             canvas.Domain = currentWorldDomain
             lockSketchViewDomain = True
+            canvas.ResetView()
 
 
 
@@ -1613,6 +1706,46 @@ Public Class MainForm
                         "Export DXF",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error)
+        End Try
+    End Sub
+
+    Private Sub ExportPng_Click(sender As Object, e As EventArgs)
+        Try
+            Using dlg As New SaveFileDialog()
+                dlg.Title = "Save PNG"
+                dlg.Filter = "PNG image (*.png)|*.png"
+                dlg.DefaultExt = "png"
+                dlg.AddExtension = True
+                dlg.FileName = "voronoi.png"
+
+                If dlg.ShowDialog(Me) = DialogResult.OK Then
+                    ' Risoluzione: 2000px sul lato lungo, l'altro segue le
+                    ' proporzioni del dominio (fit-to-domain, zoom ignorato).
+                    Dim longSide As Integer = 2000
+                    Dim pxW, pxH As Integer
+
+                    If canvas.Domain.Width >= canvas.Domain.Height Then
+                        pxW = longSide
+                        pxH = CInt(Math.Round(longSide * canvas.Domain.Height / canvas.Domain.Width))
+                    Else
+                        pxH = longSide
+                        pxW = CInt(Math.Round(longSide * canvas.Domain.Width / canvas.Domain.Height))
+                    End If
+
+                    Using bmp = canvas.RenderToBitmap(pxW, pxH)
+                        bmp.Save(dlg.FileName, Imaging.ImageFormat.Png)
+                    End Using
+
+                    MessageBox.Show("PNG saved successfully (" & pxW & " × " & pxH & " px).",
+                                    "Export PNG", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                End If
+            End Using
+
+        Catch ex As Exception
+            MessageBox.Show("Error exporting PNG:" & Environment.NewLine & ex.Message,
+                            "Export PNG",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error)
         End Try
     End Sub
 
@@ -2048,7 +2181,7 @@ Public Class ThemedSlider
     Private dragging As Boolean = False
     Private hovering As Boolean = False
 
-    Private Const ValueTextW As Integer = 40
+    Private Const ValueTextW As Integer = 34
     Private Const PadX As Integer = 8
 
     Public Event ValueChanged As EventHandler
@@ -2124,7 +2257,7 @@ Public Class ThemedSlider
 
     Private Sub SetValueFromX(x As Integer)
         Dim trackL As Integer = PadX
-        Dim trackR As Integer = Width - ValueTextW - PadX
+        Dim trackR As Integer = Width - ValueTextW - 2
         If trackR <= trackL Then Return
 
         Dim t As Double = (x - trackL) / CDbl(trackR - trackL)
@@ -2194,7 +2327,7 @@ Public Class ThemedSlider
         e.Graphics.Clear(BackColor)
 
         Dim trackL As Integer = PadX
-        Dim trackR As Integer = Width - ValueTextW - PadX
+        Dim trackR As Integer = Width - ValueTextW - 2
         Dim cy As Single = Height / 2.0F
 
         Dim range As Decimal = _max - _min

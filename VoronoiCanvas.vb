@@ -100,6 +100,17 @@ Public Class VoronoiCanvas
     Private hoverSeedIndex As Integer = -1
     Private isDragging As Boolean = False
 
+    ' --- Zoom/Pan della vista (CTRL+RMB = zoom, CTRL+SHIFT+RMB = pan, centrale = reset) ---
+    Private viewZoom As Double = 1.0
+    Private viewPanX As Double = 0.0
+    Private viewPanY As Double = 0.0
+    Private viewGesture As Integer = 0        ' 0 nessuna, 1 zoom, 2 pan
+    Private gestureStartPt As Point
+    Private gestureStartZoom As Double = 1.0
+    Private gestureStartPanX As Double = 0.0
+    Private gestureStartPanY As Double = 0.0
+    Private zoomAnchorWorld As Vec2
+
 
     Public Event SeedScalesEdited As EventHandler
     Public Event SeedRotationsEdited As EventHandler
@@ -140,17 +151,46 @@ Public Class VoronoiCanvas
     End Sub
 
     Protected Overrides Sub OnPaint(e As PaintEventArgs)
-        e.Graphics.Clear(BackColor)
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias
-        e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality
-
-        Dim view = GetView()
-
-        DrawBounds(e.Graphics, view)
-        DrawSketchBoundary(e.Graphics, view)
-        DrawCells(e.Graphics, view)
-        DrawSeeds(e.Graphics, view)
+        RenderScene(e.Graphics, GetView())
     End Sub
+
+    Private Sub RenderScene(g As Graphics, view As ViewInfo)
+        g.Clear(BackColor)
+        g.SmoothingMode = SmoothingMode.AntiAlias
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality
+
+        DrawBounds(g, view)
+        DrawSketchBoundary(g, view)
+        DrawCells(g, view)
+        DrawSeeds(g, view)
+    End Sub
+
+    ' Vista fit-to-domain per una superficie di dimensioni arbitrarie (export).
+    Private Function ComputeFitView(pxWidth As Integer, pxHeight As Integer) As ViewInfo
+        Dim pad As Single = 20.0F
+        If pxWidth <= 0 OrElse pxHeight <= 0 OrElse Domain.Width <= 0.0F OrElse Domain.Height <= 0.0F Then
+            Return New ViewInfo With {.Scale = 1.0F, .OffsetX = 0, .OffsetY = 0}
+        End If
+
+        Dim sx As Double = (pxWidth - 2 * pad) / Domain.Width
+        Dim sy As Double = (pxHeight - 2 * pad) / Domain.Height
+        Dim scale As Single = CSng(Math.Min(sx, sy))
+
+        Dim ox = CSng((pxWidth - Domain.Width * scale) / 2.0)
+        Dim oy = CSng((pxHeight - Domain.Height * scale) / 2.0)
+
+        Return New ViewInfo With {.Scale = scale, .OffsetX = ox, .OffsetY = oy}
+    End Function
+
+    ' Renderizza il diagramma completo (fit-to-domain, indipendente da zoom/pan)
+    ' su una bitmap delle dimensioni richieste.
+    Public Function RenderToBitmap(pxWidth As Integer, pxHeight As Integer) As Bitmap
+        Dim bmp As New Bitmap(Math.Max(16, pxWidth), Math.Max(16, pxHeight))
+        Using g As Graphics = Graphics.FromImage(bmp)
+            RenderScene(g, ComputeFitView(bmp.Width, bmp.Height))
+        End Using
+        Return bmp
+    End Function
 
     Private Sub DrawSketchBoundary(g As Graphics, view As ViewInfo)
         If Not ShowSketchBoundary Then Return
@@ -593,22 +633,29 @@ Public Class VoronoiCanvas
     End Function
 
 
-    Private Function GetView() As ViewInfo
+    Private Function GetBaseScale() As Double
         Dim pad As Single = 20.0F
+        If ClientSize.Width <= 0 OrElse ClientSize.Height <= 0 Then Return 1.0
+        If Domain.Width <= 0.0F OrElse Domain.Height <= 0.0F Then Return 1.0
 
+        Dim sx As Double = (ClientSize.Width - 2 * pad) / Domain.Width
+        Dim sy As Double = (ClientSize.Height - 2 * pad) / Domain.Height
+        Return Math.Min(sx, sy)
+    End Function
+
+    Private Function GetView() As ViewInfo
         If ClientSize.Width <= 0 OrElse ClientSize.Height <= 0 Then
             Return New ViewInfo With {.Scale = 1.0F, .OffsetX = 0, .OffsetY = 0}
         End If
 
-        Dim sx = CSng((ClientSize.Width - 2 * pad) / Domain.Width)
-        Dim sy = CSng((ClientSize.Height - 2 * pad) / Domain.Height)
-        Dim scale = Math.Min(sx, sy)
+        Dim scale As Single = CSng(GetBaseScale() * viewZoom)
 
-        Dim drawW = CSng(Domain.Width * scale)
-        Dim drawH = CSng(Domain.Height * scale)
+        ' Punto mondo mostrato al centro del controllo (centro dominio + pan).
+        Dim cx As Double = Domain.Left + Domain.Width / 2.0 + viewPanX
+        Dim cy As Double = Domain.Top + Domain.Height / 2.0 + viewPanY
 
-        Dim ox = (ClientSize.Width - drawW) / 2.0F
-        Dim oy = (ClientSize.Height - drawH) / 2.0F
+        Dim ox = CSng(ClientSize.Width / 2.0 - (cx - Domain.Left) * scale)
+        Dim oy = CSng(ClientSize.Height / 2.0 - (cy - Domain.Top) * scale)
 
         Return New ViewInfo With {
             .Scale = scale,
@@ -616,6 +663,23 @@ Public Class VoronoiCanvas
             .OffsetY = oy
         }
     End Function
+
+    ' Riporta la vista al fit-to-domain iniziale.
+    Public Sub ResetView()
+        viewZoom = 1.0
+        viewPanX = 0.0
+        viewPanY = 0.0
+        Invalidate()
+    End Sub
+
+    Private Sub ClampPan()
+        Dim maxX As Double = Domain.Width * 3.0
+        Dim maxY As Double = Domain.Height * 3.0
+        If viewPanX < -maxX Then viewPanX = -maxX
+        If viewPanX > maxX Then viewPanX = maxX
+        If viewPanY < -maxY Then viewPanY = -maxY
+        If viewPanY > maxY Then viewPanY = maxY
+    End Sub
 
     Private Function WorldToScreen(p As Vec2, view As ViewInfo) As PointF
         Return New PointF(
@@ -748,6 +812,32 @@ Public Class VoronoiCanvas
 
     Protected Overrides Sub OnMouseDown(e As MouseEventArgs)
         MyBase.OnMouseDown(e)
+
+        ' --- Vista: ALT+destro = reset; CTRL+destro = zoom; CTRL+SHIFT+destro = pan ---
+        If e.Button = MouseButtons.Right AndAlso (ModifierKeys And Keys.Alt) = Keys.Alt Then
+            ResetView()
+            Return
+        End If
+
+        If e.Button = MouseButtons.Right AndAlso (ModifierKeys And Keys.Control) = Keys.Control Then
+            gestureStartPt = e.Location
+            gestureStartZoom = viewZoom
+            gestureStartPanX = viewPanX
+            gestureStartPanY = viewPanY
+
+            If (ModifierKeys And Keys.Shift) = Keys.Shift Then
+                viewGesture = 2
+                Cursor = Cursors.SizeAll
+            Else
+                viewGesture = 1
+                zoomAnchorWorld = ScreenToWorld(e.Location)
+                Cursor = Cursors.SizeNS
+            End If
+
+            Capture = True
+            Return
+        End If
+
         If Not AllowSeedEditing Then Return
 
         Dim idx = HitTestSeed(e.Location)
@@ -781,6 +871,14 @@ Public Class VoronoiCanvas
                     SeedStyleKeys.RemoveAt(idx)
                 End If
 
+                If CellRotations IsNot Nothing AndAlso idx < CellRotations.Count Then
+                    CellRotations.RemoveAt(idx)
+                End If
+
+                If CellSymbolOffsets IsNot Nothing AndAlso idx < CellSymbolOffsets.Count Then
+                    CellSymbolOffsets.RemoveAt(idx)
+                End If
+
                 hoverSeedIndex = -1
                 dragSeedIndex = -1
                 RaiseEvent SeedsEdited(Me, EventArgs.Empty)
@@ -798,6 +896,54 @@ Public Class VoronoiCanvas
         LastWorldCursorY = wp.Y
         RaiseEvent WorldCursorMoved(Me, EventArgs.Empty)
 
+        ' --- Gesto vista attivo: zoom o pan (Shift commuta al volo) ---
+        If viewGesture <> 0 Then
+            ' Modalita' desiderata in base allo stato ATTUALE di Shift:
+            ' premendolo/rilasciandolo durante il drag si passa da zoom a pan
+            ' e viceversa, ri-ancorando il gesto alla posizione corrente.
+            Dim wantedMode As Integer = If((ModifierKeys And Keys.Shift) = Keys.Shift, 2, 1)
+
+            If wantedMode <> viewGesture Then
+                viewGesture = wantedMode
+                gestureStartPt = e.Location
+                gestureStartZoom = viewZoom
+                gestureStartPanX = viewPanX
+                gestureStartPanY = viewPanY
+
+                If viewGesture = 1 Then
+                    zoomAnchorWorld = ScreenToWorld(e.Location)
+                    Cursor = Cursors.SizeNS
+                Else
+                    Cursor = Cursors.SizeAll
+                End If
+            End If
+
+            If viewGesture = 1 Then
+                ' Stile Solid Edge: avanti (su) = zoom -, indietro (giu') = zoom +.
+                Dim factor As Double = Math.Exp((e.Y - gestureStartPt.Y) * 0.008)
+                viewZoom = Math.Max(0.15, Math.Min(40.0, gestureStartZoom * factor))
+
+                ' Il punto mondo sotto il cursore di partenza resta fermo a schermo.
+                Dim newScale As Double = GetBaseScale() * viewZoom
+                If newScale > 0.000001 Then
+                    viewPanX = zoomAnchorWorld.X - (Domain.Left + Domain.Width / 2.0) -
+                               (gestureStartPt.X - ClientSize.Width / 2.0) / newScale
+                    viewPanY = zoomAnchorWorld.Y - (Domain.Top + Domain.Height / 2.0) -
+                               (gestureStartPt.Y - ClientSize.Height / 2.0) / newScale
+                End If
+            Else
+                Dim curScale As Double = GetBaseScale() * viewZoom
+                If curScale > 0.000001 Then
+                    viewPanX = gestureStartPanX - (e.X - gestureStartPt.X) / curScale
+                    viewPanY = gestureStartPanY - (e.Y - gestureStartPt.Y) / curScale
+                End If
+            End If
+
+            ClampPan()
+            Invalidate()
+            Return
+        End If
+
         If Not AllowSeedEditing Then Return
 
         hoverSeedIndex = HitTestSeed(e.Location)
@@ -813,6 +959,14 @@ Public Class VoronoiCanvas
 
     Protected Overrides Sub OnMouseUp(e As MouseEventArgs)
         MyBase.OnMouseUp(e)
+
+        If viewGesture <> 0 Then
+            viewGesture = 0
+            Capture = False
+            Cursor = Cursors.Default
+            Invalidate()
+            Return
+        End If
 
         If isDragging Then
             isDragging = False
@@ -834,6 +988,7 @@ Public Class VoronoiCanvas
     Protected Overrides Sub OnMouseDoubleClick(e As MouseEventArgs)
         MyBase.OnMouseDoubleClick(e)
         If Not AllowSeedEditing Then Return
+        If e.Button <> MouseButtons.Left Then Return
 
         EditableSeeds.Add(ClampToDomain(ScreenToWorld(e.Location)))
         EnsureCellScaleCount(EditableSeeds.Count)
