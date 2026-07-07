@@ -133,6 +133,32 @@ Public Class VoronoiCanvas
     Public Property LastWorldCursorY As Double
     Public Event WorldCursorMoved As EventHandler
 
+    ' Semi bloccati: relax e rigenerazioni non li spostano.
+    Public Property SeedPinned As List(Of Boolean) = New List(Of Boolean)
+
+    ' Cella/seme selezionato (pannello proprieta').
+    Private _selectedSeed As Integer = -1
+    Public Event SelectedSeedChanged As EventHandler
+
+    Public Property SelectedSeedIndex As Integer
+        Get
+            Return _selectedSeed
+        End Get
+        Set(value As Integer)
+            Dim v As Integer = value
+            If v < -1 Then v = -1
+            If v <> _selectedSeed Then
+                _selectedSeed = v
+                RaiseEvent SelectedSeedChanged(Me, EventArgs.Empty)
+                Invalidate()
+            End If
+        End Set
+    End Property
+
+    Public Function IsSeedPinned(idx As Integer) As Boolean
+        Return SeedPinned IsNot Nothing AndAlso idx >= 0 AndAlso idx < SeedPinned.Count AndAlso SeedPinned(idx)
+    End Function
+
 
 
 
@@ -162,6 +188,7 @@ Public Class VoronoiCanvas
         DrawBounds(g, view)
         DrawSketchBoundary(g, view)
         DrawCells(g, view)
+        DrawSelectedCellOutline(g, view)
         DrawSeeds(g, view)
     End Sub
 
@@ -614,6 +641,20 @@ Public Class VoronoiCanvas
         End While
     End Sub
 
+    Private Sub EnsureSeedPinnedCount(requiredCount As Integer)
+        If SeedPinned Is Nothing Then
+            SeedPinned = New List(Of Boolean)()
+        End If
+
+        While SeedPinned.Count < requiredCount
+            SeedPinned.Add(False)
+        End While
+
+        While SeedPinned.Count > requiredCount
+            SeedPinned.RemoveAt(SeedPinned.Count - 1)
+        End While
+    End Sub
+
     Private Sub EnsureCellSymbolOffsetCount(requiredCount As Integer)
         If CellSymbolOffsets Is Nothing Then
             CellSymbolOffsets = New List(Of Integer)()
@@ -747,8 +788,60 @@ Public Class VoronoiCanvas
     End Function
 
 
+    ' Evidenzia con il colore accento tutte le celle del seme selezionato.
+    Private Sub DrawSelectedCellOutline(g As Graphics, view As ViewInfo)
+        If _selectedSeed < 0 OrElse EditableSeeds Is Nothing OrElse _selectedSeed >= EditableSeeds.Count Then Return
+        If Cells Is Nothing OrElse Cells.Count = 0 Then Return
+
+        Dim selSeed As Vec2 = EditableSeeds(_selectedSeed)
+
+        Using pen As New Pen(UiTheme.AccentHi, 2.4F)
+            pen.LineJoin = Drawing2D.LineJoin.Round
+
+            For Each cell In Cells
+                If cell Is Nothing OrElse cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Continue For
+                If Geo2D.Distance(cell.Seed, selSeed) > 0.001 Then Continue For
+
+                Dim pts(cell.Vertices.Count - 1) As PointF
+                For k As Integer = 0 To cell.Vertices.Count - 1
+                    pts(k) = WorldToScreen(cell.Vertices(k), view)
+                Next
+                g.DrawPolygon(pen, pts)
+            Next
+        End Using
+    End Sub
+
+    ' Indice del seme la cui cella contiene il punto (in coordinate schermo).
+    Private Function HitTestCellSeedIndex(screenPt As Point) As Integer
+        If Cells Is Nothing OrElse Cells.Count = 0 Then Return -1
+        If EditableSeeds Is Nothing OrElse EditableSeeds.Count = 0 Then Return -1
+
+        Dim wp As Vec2 = ScreenToWorld(screenPt)
+
+        For Each cell In Cells
+            If cell Is Nothing OrElse cell.Vertices Is Nothing OrElse cell.Vertices.Count < 3 Then Continue For
+            If Not Geo2D.PointInPolygon(wp, cell.Vertices) Then Continue For
+
+            ' Mappa la cella al suo seme in EditableSeeds.
+            Dim best As Integer = -1
+            Dim bestD As Double = Double.MaxValue
+            For i As Integer = 0 To EditableSeeds.Count - 1
+                Dim d = Geo2D.Distance(EditableSeeds(i), cell.Seed)
+                If d < bestD Then
+                    bestD = d
+                    best = i
+                End If
+            Next
+            If bestD <= 0.5 Then Return best
+            Return -1
+        Next
+
+        Return -1
+    End Function
+
     Private Sub DrawSeeds(g As Graphics, view As ViewInfo)
         If Not ShowSeeds OrElse EditableSeeds Is Nothing Then Return
+        EnsureSeedPinnedCount(EditableSeeds.Count)
 
         For i As Integer = 0 To EditableSeeds.Count - 1
             Dim sp = WorldToScreen(EditableSeeds(i), view)
@@ -768,13 +861,26 @@ Public Class VoronoiCanvas
                 borderColor = Color.White
             End If
 
+            If i = _selectedSeed Then
+                r += 1.5F
+                borderColor = UiTheme.AccentHi
+            End If
+
             Using b As New SolidBrush(fillColor)
                 g.FillEllipse(b, sp.X - r, sp.Y - r, r * 2, r * 2)
             End Using
 
-            Using p As New Pen(borderColor, 1.2F)
+            Using p As New Pen(borderColor, If(i = _selectedSeed, 2.0F, 1.2F))
                 g.DrawEllipse(p, sp.X - r, sp.Y - r, r * 2, r * 2)
             End Using
+
+            ' Anello bianco = seme bloccato (pin).
+            If IsSeedPinned(i) Then
+                Using p As New Pen(Color.White, 1.6F)
+                    Dim rr As Single = r + 3.0F
+                    g.DrawEllipse(p, sp.X - rr, sp.Y - rr, rr * 2, rr * 2)
+                End Using
+            End If
         Next
     End Sub
 
@@ -844,6 +950,14 @@ Public Class VoronoiCanvas
 
         If e.Button = MouseButtons.Left Then
             If idx >= 0 Then
+                SelectedSeedIndex = idx
+
+                ' Un seme bloccato si seleziona ma non si trascina.
+                If IsSeedPinned(idx) Then
+                    Invalidate()
+                    Return
+                End If
+
                 dragSeedIndex = idx
                 isDragging = True
                 Capture = True
@@ -854,10 +968,16 @@ Public Class VoronoiCanvas
             If (ModifierKeys And Keys.Control) = Keys.Control Then
                 EditableSeeds.Add(ClampToDomain(ScreenToWorld(e.Location)))
                 EnsureCellScaleCount(EditableSeeds.Count)
+                EnsureSeedPinnedCount(EditableSeeds.Count)
                 CellScales(EditableSeeds.Count - 1) = ClampCellScale(CellScale)
+                SelectedSeedIndex = EditableSeeds.Count - 1
                 RaiseEvent SeedsEdited(Me, EventArgs.Empty)
                 Invalidate()
+                Return
             End If
+
+            ' Click dentro una cella: seleziona il suo seme (fuori: deseleziona).
+            SelectedSeedIndex = HitTestCellSeedIndex(e.Location)
 
         ElseIf e.Button = MouseButtons.Right Then
             If idx >= 0 AndAlso EditableSeeds.Count > 3 Then
@@ -877,6 +997,16 @@ Public Class VoronoiCanvas
 
                 If CellSymbolOffsets IsNot Nothing AndAlso idx < CellSymbolOffsets.Count Then
                     CellSymbolOffsets.RemoveAt(idx)
+                End If
+
+                If SeedPinned IsNot Nothing AndAlso idx < SeedPinned.Count Then
+                    SeedPinned.RemoveAt(idx)
+                End If
+
+                If _selectedSeed = idx Then
+                    SelectedSeedIndex = -1
+                ElseIf _selectedSeed > idx Then
+                    SelectedSeedIndex = _selectedSeed - 1
                 End If
 
                 hoverSeedIndex = -1
