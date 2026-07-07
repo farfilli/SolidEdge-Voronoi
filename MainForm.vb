@@ -15,7 +15,9 @@ Public Class MainForm
 
     Private ReadOnly sidebar As New Panel()
     Private ReadOnly sideViewport As New Panel()
-    Private ReadOnly sideBottomBar As New Panel()
+    Private ReadOnly topBar As New Panel()
+    Private ReadOnly topBarGroupLabels As New List(Of KeyValuePair(Of Integer, String))
+    Private ReadOnly topBarSeparators As New List(Of Integer)
     Private ReadOnly sideScroll As New ThemedVScrollBar()
     Private ReadOnly sideLayout As New FlowLayoutPanel()
 
@@ -113,7 +115,7 @@ Public Class MainForm
         StartPosition = FormStartPosition.CenterScreen
         Width = 1550
         Height = 920
-        MinimumSize = New Size(1200, 760)
+        MinimumSize = New Size(1280, 760)
 
         Icon = My.Resources.SE_Voronoi
         Font = New Font("Segoe UI", 9.0F)
@@ -122,6 +124,7 @@ Public Class MainForm
         ConfigureControls()
         LoadUserSettings()
         BuildSidebar()
+        BuildTopBar()
         BuildStatusBar()
 
         canvas.Dock = DockStyle.Fill
@@ -131,6 +134,7 @@ Public Class MainForm
 
         Controls.Add(canvas)
         Controls.Add(sidebar)
+        Controls.Add(topBar)
         Controls.Add(statusBar)
 
         ApplyDarkTheme()
@@ -218,32 +222,9 @@ Public Class MainForm
         sideLayout.Margin = New Padding(0)
         sideLayout.Location = New Point(0, 0)
 
-        ' Barra fissa in fondo (toggle tema + Help): docked Bottom, quindi
-        ' sempre visibile ed esclusa dallo scrolling del viewport.
-        sideBottomBar.Dock = DockStyle.Bottom
-        sideBottomBar.Height = 62
-        sideBottomBar.BackColor = UiTheme.BgSidebar
-        AddHandler sideBottomBar.Paint,
-            Sub(ps, pe)
-                Using pn As New Pen(UiTheme.Border, 1.0F)
-                    pe.Graphics.DrawLine(pn, 0, 1, sideBottomBar.Width, 1)
-                End Using
-            End Sub
-
-        chkDarkTheme.Width = 244
-        chkDarkTheme.Height = 22
-        chkDarkTheme.Location = New Point(3, 8)
-        sideBottomBar.Controls.Add(chkDarkTheme)
-
-        btnHelp.Width = 244
-        btnHelp.Height = 26
-        btnHelp.Location = New Point(0, 34)
-        sideBottomBar.Controls.Add(btnHelp)
-
         sideViewport.Controls.Add(sideLayout)
         sidebar.Controls.Add(sideViewport)
         sidebar.Controls.Add(sideScroll)
-        sidebar.Controls.Add(sideBottomBar)
 
         AddHandler sideLayout.SizeChanged, Sub(s, ev) UpdateSidebarScroll()
         AddHandler sideViewport.Resize, Sub(s, ev) UpdateSidebarScroll()
@@ -268,9 +249,6 @@ Public Class MainForm
              "Random Seed", numSeed)
         AddDoubleRow("Relax", numRelax,
              "Cell Scale", numCellScale)
-        AddDoubleRow("", btnGenerate,
-             "", btnShuffle, 32)
-
         ' ===== STYLE =====
         curSection = NewSection("STYLE", True)
         AddRowTitle("Cell Style")
@@ -289,22 +267,9 @@ Public Class MainForm
         AddRowControl(chkSeeds, 22)
         AddRowControl(chkInner, 22)
 
-        ' ===== SKETCH & BLOCKS =====
-        curSection = NewSection("SKETCH & BLOCKS", False)
-        AddRowControl(btnReadSketchProfile, 30)
-        AddRowControl(btnReadBlockDefaultView, 30)
-        AddRowControl(btnLoadBlocks, 30)
-        AddRowControl(btnSaveBlocks, 30)
-        AddRowControl(btnClearBlocks, 30)
-        AddRowControl(btnBlockLibrary, 30)
-
         ' ===== EXPORT =====
         curSection = NewSection("EXPORT", True)
-        AddRowControl(btnExportSvg, 30)
-        AddRowControl(btnExportDxf, 30)
-        AddRowControl(btnExportPng, 30)
         AddRowControl(chkExportAsBlocks, 22)
-        AddRowControl(btnToSolidEdge, 32)
 
         ' ===== SELECTED CELL =====
         curSection = NewSection("SELECTED CELL", True)
@@ -316,6 +281,107 @@ Public Class MainForm
 
 
         chkDarkTheme.Text = "Dark theme"
+    End Sub
+
+    ' Toolbar orizzontale: tutte le azioni (pulsanti), raggruppate.
+    ' La sidebar resta ai soli parametri (combo, slider, checkbox).
+    Private Sub BuildTopBar()
+        topBar.Dock = DockStyle.Top
+        topBar.Height = 64
+        topBar.BackColor = UiTheme.BgSidebar
+        AddHandler topBar.Paint, AddressOf TopBar_Paint
+        AddHandler topBar.Resize, AddressOf TopBar_Resize
+
+        ' Etichette compatte per stare in toolbar (l'Help spiega i dettagli).
+        btnReadSketchProfile.Text = "Read Sketch"
+        btnReadBlockDefaultView.Text = "Read SE Blocks"
+        btnLoadBlocks.Text = "Load"
+        btnSaveBlocks.Text = "Save"
+        btnClearBlocks.Text = "Clear"
+        btnBlockLibrary.Text = "Library"
+        btnExportSvg.Text = "SVG"
+        btnExportDxf.Text = "DXF"
+        btnExportPng.Text = "PNG"
+
+        topBarGroupLabels.Clear()
+        topBarSeparators.Clear()
+
+        Dim x As Integer = 12
+        x = AddTopBarGroup(x, "GENERATE",
+                           {btnGenerate, btnShuffle},
+                           {92, 88})
+        topBarSeparators.Add(x)
+        x += 15
+
+        x = AddTopBarGroup(x, "SKETCH && BLOCKS",
+                           {btnReadSketchProfile, btnReadBlockDefaultView, btnLoadBlocks, btnSaveBlocks, btnClearBlocks, btnBlockLibrary},
+                           {108, 118, 58, 58, 58, 72})
+        topBarSeparators.Add(x)
+        x += 15
+
+        x = AddTopBarGroup(x, "EXPORT",
+                           {btnExportSvg, btnExportDxf, btnExportPng, btnToSolidEdge},
+                           {56, 56, 56, 112})
+
+        ' Lato destro (riposizionato dal Resize): toggle tema + Help.
+        chkDarkTheme.Width = 100
+        chkDarkTheme.Height = 22
+        topBar.Controls.Add(chkDarkTheme)
+
+        btnHelp.Width = 60
+        btnHelp.Height = 30
+        topBar.Controls.Add(btnHelp)
+
+        TopBar_Resize(topBar, EventArgs.Empty)
+    End Sub
+
+    Private Function AddTopBarGroup(startX As Integer,
+                                    label As String,
+                                    buttons As ThemedButton(),
+                                    widths As Integer()) As Integer
+        topBarGroupLabels.Add(New KeyValuePair(Of Integer, String)(startX, label.Replace("&&", "&")))
+
+        Dim x As Integer = startX
+        For i As Integer = 0 To buttons.Length - 1
+            buttons(i).Width = widths(i)
+            buttons(i).Height = 30
+            buttons(i).Location = New Point(x, 26)
+            topBar.Controls.Add(buttons(i))
+            x += widths(i) + 8
+        Next
+
+        Return x + 6
+    End Function
+
+    Private Sub TopBar_Resize(sender As Object, e As EventArgs)
+        btnHelp.Location = New Point(topBar.Width - btnHelp.Width - 12, 26)
+        chkDarkTheme.Location = New Point(btnHelp.Left - chkDarkTheme.Width - 12, 30)
+    End Sub
+
+    Private Sub TopBar_Paint(sender As Object, e As PaintEventArgs)
+        ' Linea di chiusura in basso.
+        Using pn As New Pen(UiTheme.Border, 1.0F)
+            e.Graphics.DrawLine(pn, 0, topBar.Height - 1, topBar.Width, topBar.Height - 1)
+        End Using
+
+        ' Etichette dei gruppi in maiuscoletto attenuato.
+        Using f As New Font("Segoe UI", 7.0F, FontStyle.Bold)
+            Using br As New SolidBrush(UiTheme.TxtDim)
+                For Each kv In topBarGroupLabels
+                    TextRenderer.DrawText(e.Graphics, kv.Value, f,
+                                          New Point(kv.Key, 6), UiTheme.TxtDim)
+                Next
+            End Using
+        End Using
+
+        ' Separatori verticali tra i gruppi + prima del lato destro.
+        Using pn As New Pen(UiTheme.Border, 1.0F)
+            For Each sx In topBarSeparators
+                e.Graphics.DrawLine(pn, sx, 12, sx, topBar.Height - 10)
+            Next
+            Dim rightSep As Integer = chkDarkTheme.Left - 14
+            e.Graphics.DrawLine(pn, rightSep, 12, rightSep, topBar.Height - 10)
+        End Using
     End Sub
 
     Private Function NewSection(title As String, startOpen As Boolean) As CollapsibleSection
@@ -435,6 +501,10 @@ Public Class MainForm
         sideLayout.BackColor = UiTheme.BgSidebar
 
         RethemeControlTree(sidebar)
+
+        topBar.BackColor = UiTheme.BgSidebar
+        RethemeControlTree(topBar)
+        topBar.Invalidate()
 
         appTitleLbl.ForeColor = UiTheme.Accent
 
@@ -3859,7 +3929,7 @@ Public Class HelpForm
         Heading(rtb, "MOUSE - SIDEBAR")
         Item(rtb, "Wheel over a combo box", "change the selected value")
         Item(rtb, "Wheel over a slider / numeric field", "adjust the value")
-        Item(rtb, "Wheel elsewhere", "scroll the sidebar (when the scrollbar is visible)")
+        Item(rtb, "Wheel elsewhere", "scroll the sidebar (when the scrollbar is visible); all action buttons live in the top toolbar")
         Item(rtb, "Click a section header", "collapse / expand the section")
         Gap(rtb)
 
@@ -3894,15 +3964,15 @@ Public Class HelpForm
         Gap(rtb)
 
         Heading(rtb, "SKETCH & BLOCKS")
-        Item(rtb, "Read Sketch Profile", "reads the active Solid Edge sketch as the generation domain (holes supported)")
+        Item(rtb, "Read Sketch", "reads the active Solid Edge sketch as the generation domain (holes supported)")
         Item(rtb, "Read SE Blocks", "imports block definitions from the document (additive, deduplicated by name)")
-        Item(rtb, "Load / Save Blocks", "block library files (.sevb); Clear Blocks empties the memory")
-        Item(rtb, "Block Library", "preview gallery of loaded blocks, with per-block removal")
+        Item(rtb, "Load / Save / Clear", "block library files (.sevb); Clear empties the memory")
+        Item(rtb, "Library", "preview gallery of loaded blocks, with per-block removal")
         Gap(rtb)
 
         Heading(rtb, "EXPORT")
-        Item(rtb, "Export SVG / DXF", "vector output of the current geometry")
-        Item(rtb, "Export PNG", "2000 px image of the whole domain (ignores zoom/pan)")
+        Item(rtb, "SVG / DXF", "vector output of the current geometry")
+        Item(rtb, "PNG", "2000 px image of the whole domain (ignores zoom/pan)")
         Item(rtb, "To SE as blocks", "emits block occurrences instead of raw geometry")
         Item(rtb, "To Solid Edge", "draws into the active sketch (missing block definitions are created)")
         Gap(rtb)
@@ -3912,7 +3982,7 @@ Public Class HelpForm
         Gap(rtb)
 
         Heading(rtb, "GENERAL")
-        Item(rtb, "Dark theme", "toggles between dark and light palettes (the canvas stays dark: the cell colors are designed for it); pinned at the bottom of the sidebar and remembered across sessions")
+        Item(rtb, "Dark theme", "toggles between dark and light palettes (the canvas stays dark: the cell colors are designed for it); in the top toolbar and remembered across sessions")
         Item(rtb, "Help", "opens this window")
     End Sub
 End Class
