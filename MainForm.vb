@@ -15,6 +15,7 @@ Public Class MainForm
 
     Private ReadOnly sidebar As New Panel()
     Private ReadOnly sideViewport As New Panel()
+    Private ReadOnly sideBottomBar As New Panel()
     Private ReadOnly sideScroll As New ThemedVScrollBar()
     Private ReadOnly sideLayout As New FlowLayoutPanel()
 
@@ -58,7 +59,7 @@ Public Class MainForm
     Private ReadOnly btnExportDxf As New ThemedButton()
     Private ReadOnly btnExportPng As New ThemedButton()
     Private ReadOnly btnHelp As New ThemedButton()
-    Private ReadOnly chkLightTheme As New ThemedCheckBox()
+    Private ReadOnly chkDarkTheme As New ThemedCheckBox()
 
     ' Pannello proprieta' della cella selezionata
     Private ReadOnly lblSelInfo As New Label()
@@ -134,7 +135,7 @@ Public Class MainForm
 
         ApplyDarkTheme()
 
-        If chkLightTheme.Checked Then
+        If Not chkDarkTheme.Checked Then
             ApplyFullTheme(False)
         End If
 
@@ -155,7 +156,7 @@ Public Class MainForm
         AddHandler btnExportDxf.Click, AddressOf ExportDxf_Click
         AddHandler btnExportPng.Click, AddressOf ExportPng_Click
         AddHandler btnHelp.Click, AddressOf ShowHelp_Click
-        AddHandler chkLightTheme.CheckedChanged, AddressOf ThemeToggle_Changed
+        AddHandler chkDarkTheme.CheckedChanged, AddressOf ThemeToggle_Changed
         AddHandler canvas.SelectedSeedChanged, AddressOf Canvas_SelectedSeedChanged
         AddHandler selScale.ValueChanged, AddressOf SelScale_Changed
         AddHandler selRotation.ValueChanged, AddressOf SelRotation_Changed
@@ -217,9 +218,32 @@ Public Class MainForm
         sideLayout.Margin = New Padding(0)
         sideLayout.Location = New Point(0, 0)
 
+        ' Barra fissa in fondo (toggle tema + Help): docked Bottom, quindi
+        ' sempre visibile ed esclusa dallo scrolling del viewport.
+        sideBottomBar.Dock = DockStyle.Bottom
+        sideBottomBar.Height = 62
+        sideBottomBar.BackColor = UiTheme.BgSidebar
+        AddHandler sideBottomBar.Paint,
+            Sub(ps, pe)
+                Using pn As New Pen(UiTheme.Border, 1.0F)
+                    pe.Graphics.DrawLine(pn, 0, 1, sideBottomBar.Width, 1)
+                End Using
+            End Sub
+
+        chkDarkTheme.Width = 244
+        chkDarkTheme.Height = 22
+        chkDarkTheme.Location = New Point(3, 8)
+        sideBottomBar.Controls.Add(chkDarkTheme)
+
+        btnHelp.Width = 244
+        btnHelp.Height = 26
+        btnHelp.Location = New Point(0, 34)
+        sideBottomBar.Controls.Add(btnHelp)
+
         sideViewport.Controls.Add(sideLayout)
         sidebar.Controls.Add(sideViewport)
         sidebar.Controls.Add(sideScroll)
+        sidebar.Controls.Add(sideBottomBar)
 
         AddHandler sideLayout.SizeChanged, Sub(s, ev) UpdateSidebarScroll()
         AddHandler sideViewport.Resize, Sub(s, ev) UpdateSidebarScroll()
@@ -259,14 +283,6 @@ Public Class MainForm
         AddRowControl(chkFillSymbols, 22)
         AddRowControl(chkRandomRotation, 22)
 
-        ' ===== SELECTED CELL =====
-        curSection = NewSection("SELECTED CELL", True)
-        AddRowControl(lblSelInfo, 18)
-        AddDoubleRow("Scale", selScale,
-             "Rotation", selRotation)
-        AddDoubleRow("Symbol Offset", selSymbolOffset,
-             "", chkSelPinned)
-
         ' ===== DISPLAY =====
         curSection = NewSection("DISPLAY", False)
         AddRowControl(chkOuter, 22)
@@ -290,17 +306,16 @@ Public Class MainForm
         AddRowControl(chkExportAsBlocks, 22)
         AddRowControl(btnToSolidEdge, 32)
 
-        ' Toggle tema + Help in fondo alla sidebar
-        chkLightTheme.Text = "Light theme"
-        chkLightTheme.Width = 244
-        chkLightTheme.Height = 22
-        chkLightTheme.Margin = New Padding(3, 12, 0, 2)
-        sideLayout.Controls.Add(chkLightTheme)
+        ' ===== SELECTED CELL =====
+        curSection = NewSection("SELECTED CELL", True)
+        AddRowControl(lblSelInfo, 18)
+        AddDoubleRow("Scale", selScale,
+             "Rotation", selRotation)
+        AddDoubleRow("Symbol Offset", selSymbolOffset,
+             "", chkSelPinned)
 
-        btnHelp.Width = 244
-        btnHelp.Height = 28
-        btnHelp.Margin = New Padding(0, 2, 0, 6)
-        sideLayout.Controls.Add(btnHelp)
+
+        chkDarkTheme.Text = "Dark theme"
     End Sub
 
     Private Function NewSection(title As String, startOpen As Boolean) As CollapsibleSection
@@ -397,14 +412,14 @@ Public Class MainForm
 
         lblSelInfo.ForeColor = UiTheme.TxtDim
 
-        For Each chk In New CheckBox() {chkFill, chkFillSymbols, chkOuter, chkSeeds, chkInner, chkRandomRotation, chkExportAsBlocks, chkLightTheme, chkSelPinned}
+        For Each chk In New CheckBox() {chkFill, chkFillSymbols, chkOuter, chkSeeds, chkInner, chkRandomRotation, chkExportAsBlocks, chkDarkTheme, chkSelPinned}
             chk.ForeColor = UiTheme.Txt
             chk.BackColor = UiTheme.BgSidebar
         Next
     End Sub
 
     Private Sub ThemeToggle_Changed(sender As Object, e As EventArgs)
-        ApplyFullTheme(Not chkLightTheme.Checked)
+        ApplyFullTheme(chkDarkTheme.Checked)
     End Sub
 
     ' Commuta la palette e riapplica i colori a tutta la UI costruita.
@@ -598,7 +613,7 @@ Public Class MainForm
                 "ShowSeeds=" & chkSeeds.Checked.ToString(),
                 "ShowInner=" & chkInner.Checked.ToString(),
                 "ExportAsBlocks=" & chkExportAsBlocks.Checked.ToString(),
-                "LightTheme=" & chkLightTheme.Checked.ToString()
+                "DarkTheme=" & chkDarkTheme.Checked.ToString()
             }
 
             For Each sec In sideLayout.Controls.OfType(Of CollapsibleSection)()
@@ -648,7 +663,12 @@ Public Class MainForm
             If map.TryGetValue("ShowSeeds", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkSeeds.Checked = bVal
             If map.TryGetValue("ShowInner", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkInner.Checked = bVal
             If map.TryGetValue("ExportAsBlocks", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkExportAsBlocks.Checked = bVal
-            If map.TryGetValue("LightTheme", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkLightTheme.Checked = bVal
+            If map.TryGetValue("DarkTheme", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then
+                chkDarkTheme.Checked = bVal
+            ElseIf map.TryGetValue("LightTheme", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then
+                ' Chiave della versione precedente: semantica invertita.
+                chkDarkTheme.Checked = Not bVal
+            End If
 
             sectionStatesFromSettings.Clear()
             For Each kv In map
@@ -828,6 +848,8 @@ Public Class MainForm
 
         chkSelPinned.Text = "Pin seed"
         chkSelPinned.Enabled = False
+
+        chkDarkTheme.Checked = True
         numVertexTrim.DecimalPlaces = 2
         numVertexTrim.Increment = 0.05D
         numVertexTrim.Value = 0.22D
@@ -3890,7 +3912,7 @@ Public Class HelpForm
         Gap(rtb)
 
         Heading(rtb, "GENERAL")
-        Item(rtb, "Light theme", "switches the interface between dark and light palettes (the canvas stays dark: the cell colors are designed for it); remembered across sessions")
+        Item(rtb, "Dark theme", "toggles between dark and light palettes (the canvas stays dark: the cell colors are designed for it); pinned at the bottom of the sidebar and remembered across sessions")
         Item(rtb, "Help", "opens this window")
     End Sub
 End Class
