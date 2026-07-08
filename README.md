@@ -2,132 +2,154 @@
 
 ![Main UI](Images/main-ui.png)
 
-A WinForms VB.NET application for generating, editing, previewing, and exporting Voronoi-based geometric patterns. The program supports both a standard rectangular working domain and closed sketch profiles imported from Solid Edge, including regions with inner holes.
+A WinForms VB.NET application for generating, editing, previewing, and exporting Voronoi-based geometric patterns. The program supports both a standard rectangular working domain and closed sketch profiles imported from Solid Edge, including regions with inner holes. Patterns can be refined cell by cell, saved as complete project files, and exported to SVG, DXF, PNG, or directly into a Solid Edge sketch - as raw geometry or as block occurrences.
 
 ## Overview
 
-The application generates Voronoi cells from editable seed points and displays them on an interactive canvas with multiple rendering modes. It also includes a shared export pipeline that converts the visible result into geometric paths suitable for SVG, DXF, and Solid Edge sketch output.
+The application generates Voronoi cells from editable seed points and displays them on an interactive canvas with zoom, pan, per-cell editing, and multiple rendering modes. A shared export pipeline converts the visible result into geometric paths suitable for SVG, DXF, PNG, and Solid Edge sketch output. Everything that defines a pattern - settings, sketch profile, seeds with their per-cell properties, and imported blocks - can be stored in a single project file.
 
 ## Main Features
 
-- Generate Voronoi diagrams inside the default rectangular domain.
-- Read closed sketch profiles from the active Solid Edge sketch and use them as generation boundaries.
-- Support multiple outer loops and hole regions inside imported sketch domains.
-- Edit seed points interactively on the canvas and rebuild the geometry after changes.
-- Render cells as straight edges, curved inner paths, circles, regular polygons, and star-based symbols, including Star, Star3, and Star4.
-- Import Solid Edge block definitions and use them as cell symbols.
-- Import and faithfully reconstruct ellipses, circles, elliptical arcs, and B-spline curves.
-- Scale and rotate individual cell symbols and blocks directly with the mouse wheel.
-- Preserve symbol orientation while dragging seeds, with no angle recalculation during the drag.
-- Export the generated geometry to SVG, DXF, or directly to the active Solid Edge sketch.
-- Export only the currently visible layers to SVG (selective export).
-- Send block-based cells to Solid Edge as native block occurrences.
+- Generate Voronoi diagrams inside the default rectangular domain or inside closed sketch profiles read from Solid Edge (multiple outer loops and holes supported).
+- Project files (`.sevproj`): New / Open / Save from the toolbar, storing settings, sketch profile, seeds with per-cell properties, and blocks in one file. The title bar shows the open project and unsaved changes (`*`), and closing prompts to save.
+- Edit seed points interactively on the canvas: drag, add, remove, and rebuild the geometry after every change.
+- Select a single cell and fine-tune it from the SELECTED CELL panel or with mouse-wheel shortcuts: per-cell scale, rotation, and symbol.
+- Pin seeds so they survive regeneration: pinned cells keep position, style, scale, rotation, and symbol when a new diagram is generated.
+- Zoom and pan the canvas with Solid Edge-style mouse gestures, with one-click view reset.
+- Render cells as straight edges, curved inner paths, circles, regular polygons, star symbols, or imported Solid Edge blocks.
+- Block library: read block definitions from the active Solid Edge document, load and save block sets (`.sevb`), preview them in a gallery window, and use them as cell symbols.
+- Export to SVG, DXF, PNG (2000 px), or directly into the active Solid Edge sketch - optionally as block occurrences instead of raw geometry.
+- Dark and light theme with fully themed custom controls, switchable at runtime and remembered across sessions.
+- User settings and collapsed-section state persisted in `%AppData%\SE-Voronoi\settings.txt`.
 
 ## User Interface
 
 ![Main UI](Images/main-ui.png)
 
-The main window combines a compact control sidebar on the left with a large drawing canvas on the right. The sidebar exposes generation parameters, rendering options, sketch import controls, and export commands, while the canvas is responsible for visualization and direct seed manipulation.
+The main window is organized in three areas:
+
+- A horizontal toolbar at the top with all the actions, grouped as PROJECT (New, Open, Save), GENERATE (Generate, New Seed), SKETCH & BLOCKS (Read Sketch, Read SE Blocks, Load, Save, Clear, Library), and EXPORT (SVG, DXF, PNG, To Solid Edge). The dark-theme toggle and the Help window live on the right side.
+- A sidebar on the left containing only parameters, organized in collapsible sections (GENERATION, STYLE, DISPLAY, EXPORT, SELECTED CELL) whose open/closed state is remembered.
+- The interactive canvas, with a status bar at the bottom.
+
+![Toolbar](Images/toolbar.png)
+
+### Themes
+
+![Dark and light theme](Images/theme-dark-light.png)
+
+The whole interface - including the title bar, custom sliders, combo boxes, checkboxes, scrollbars, and the secondary windows (Block Library, Help) - follows the selected theme. The canvas background stays navy in both themes because the cell palette is designed for it. The toggle is in the toolbar and the choice is persisted.
+
+## Project Files
+
+![Project workflow](Images/project-files.png)
+
+A project file (`.sevproj`) captures the complete state of a pattern: all parameters, the imported sketch profile (loops, holes, and generation regions), every seed with its per-cell style, scale, rotation, symbol offset and pin flag, and the current block library. Reopening a project restores the exact layout without regeneration. Unsaved changes are tracked (`*` in the title bar) and the application asks to save on New, Open, and exit.
 
 ## Random Voronoi Generation
 
 ![Random generation](Images/random-generation.png)
 
-The default workflow creates Voronoi seed points inside a rectangular domain defined in the main form and optionally applies relaxation passes before building the final cells. This provides a fast way to explore procedural layouts before moving to constrained CAD-oriented domains.
+The default workflow creates Voronoi seed points inside a rectangular domain and optionally applies relaxation passes before building the final cells. Pinned seeds are preserved: regeneration only replaces the unpinned ones.
 
 ## Sketch Profile Import
 
 ![Sketch profile import](Images/sketch-profile-import.png)
 
-When Solid Edge is running with an active sketch, the application can read lines, arcs, and circles, reconstruct closed loops, and classify them into outer boundaries and holes. Those loops are then converted into sketch domains used to constrain Voronoi generation inside the imported profile.
+When Solid Edge is running with an active sketch, the application reads lines, arcs, and circles, reconstructs closed loops, and classifies them into outer boundaries (yellow) and holes (red). Those loops become generation domains: seeds are constrained inside the profile and cells are clipped against the holes. Cell count is distributed between multiple regions proportionally to their area.
 
-## Solid Edge Block Import
+## Canvas Navigation
 
-![Solid Edge block import](Images/block-import.png)
+![Canvas navigation](Images/canvas-navigation.png)
 
-Block definitions contained in the active sketch can be imported and used as cell symbols. Each block is read as native geometry and distributed across the cells, so the same drawing can be filled with custom shapes (logos, icons, mechanical symbols) instead of the built-in primitives. Per-cell scale and rotation can then be adjusted individually (see Symbol and Block Scaling).
-
-## Curve Import (Ellipses, Elliptical Arcs, and B-Splines)
-
-![Curve import](Images/curve-import.png)
-
-Beyond lines and arcs, the import recognizes and reconstructs complex curves:
-
-- Ellipses and circles are kept as native entities rather than being split into arcs.
-- Elliptical arcs are reconstructed using their orientation, so the arc follows the correct side and sweep.
-- B-spline curves are read from their interpolation nodes. In the preview the curve is approximated with a C2 cubic spline (natural for open curves, periodic for closed ones) that closely matches the original Solid Edge curve, while export recreates the native curve.
+The canvas supports Solid Edge-style navigation: CTRL + right-drag zooms anchored at the cursor, CTRL + SHIFT + right-drag pans (SHIFT can be toggled mid-gesture), and ALT + right-click resets the view. PNG export always renders the whole domain regardless of the current zoom.
 
 ## Seed Editing
 
 ![Seed editing](Images/seed-editing.png)
 
-Seed points can be edited directly on the canvas, allowing local refinement of the generated pattern without restarting the whole process. After a seed edit, the form updates the current seed list and rebuilds the Voronoi cells from the edited positions.
+Seed points can be edited directly on the canvas: drag to move, CTRL + click or double-click to add, right-click to remove. After every edit the seed list is updated and the Voronoi cells are rebuilt from the edited positions.
 
-While a seed is being dragged, the random orientation of symbols is **not** recalculated: symbols keep their angle as the cell changes shape, which avoids flickering and continuous spinning. The orientation is refreshed only when the drag is released.
+## Cell Selection and Per-Cell Editing
 
-![Dragging a seed without angle recalculation](Images/seed-drag.png)
+![Cell selection](Images/cell-selection.png)
+
+Clicking a cell (or its seed) selects it: the cell is outlined and the SELECTED CELL sidebar section shows its properties. Scale, rotation, and symbol can be changed per cell from the panel or directly with the mouse wheel over the cell (wheel = scale, SHIFT + wheel = rotate, CTRL + wheel = cycle symbol).
+
+### Pinned Seeds
+
+![Pinned seeds](Images/pinned-seeds.png)
+
+A selected cell can be pinned (white ring around its seed). Pinned seeds cannot be dragged accidentally and survive regeneration with all their per-cell properties, making it possible to lock refined areas while re-rolling the rest of the pattern.
 
 ## Rendering Styles
 
 ![Rendering styles](Images/render-styles.png)
 
-The rendering system supports several `CellRenderStyle` modes, including Straight, Curved, Circle, Square, RoundedSquare, Triangle, Pentagon, Hexagon, Octagon, Star, Star3, and Star4, plus imported Solid Edge blocks as cell symbols. Inner curve and symbol corner behavior can be controlled independently with sharp, Bezier, or fillet-arc handling depending on the selected mode. Supported geometry types include lines, arcs, cubic Beziers, circles, ellipses, elliptical arcs, and B-spline curves.
+The rendering system supports several `CellRenderStyle` modes, including Straight, Curved, Circle, Square, RoundedSquare, Triangle, Pentagon, Hexagon, Octagon, Star, Star3, Star4, and Solid Edge blocks. Inner curve and symbol corner behavior can be controlled independently with sharp, Bezier, or fillet-arc handling. Styles can also be mixed per cell through the selection tools.
 
-## Symbol and Block Scaling
+## Block Library
 
-![Symbol and block scaling with the mouse wheel](Images/wheel-scale.png)
+![Block library](Images/block-library.png)
 
-Each symbol or block can be resized and rotated individually by hovering its cell:
-
-- **Mouse wheel** scales the symbol/block of the cell under the cursor.
-- **Shift + Mouse wheel** rotates it.
-
-Manual per-cell adjustments persist across partial rebuilds and are reset only by a new generation, while the global sliders preserve the relative manual edits.
+Block definitions can be imported from the active Solid Edge document (deduplicated by name), loaded from and saved to `.sevb` files, and browsed in the Block Library window with rendered previews and per-block removal. Imported blocks become available as cell symbols and travel with the project file.
 
 ## Export Output
 
 ![Export output](Images/export-output.png)
 
-The export pipeline converts the current visual result into line, arc, ellipse, elliptical-arc, circle, B-spline, and cubic Bezier segments, making the output reusable across multiple destinations. The same exported geometry can be saved as SVG, written as DXF, or sent directly into the active Solid Edge sketch.
+The export pipeline converts the current visual result into line, arc, and cubic Bezier segments, reusable across all destinations: SVG and DXF vector files, a 2000 px PNG image, or the active Solid Edge sketch. With "To SE as blocks" enabled, cells based on blocks are sent as block occurrences (missing definitions are created automatically) instead of raw geometry.
 
-### Selective SVG Export
+## Help
 
-![Selective SVG export](Images/svg-selective.png)
+![Help window](Images/help-window.png)
 
-The SVG export reflects exactly what is visible on the canvas according to the active checkboxes (sketch boundary, cell fill, outer edges, inner curves/symbols, seeds). Turning a layer off removes it from the exported file, so the SVG matches the on-screen result.
+A modeless, themed Help window documents every mouse gesture, toolbar command, and sidebar parameter.
 
-### Blocks Exported as Block Occurrences
+## Mouse and Keyboard Controls
 
-![Blocks exported as occurrences](Images/export-blocks.png)
-
-When sending to Solid Edge with the "To SE as blocks (occurrences)" option enabled, cells based on a block are inserted as native block occurrences that reuse the existing block definition, instead of flattened geometry. All other cells are sent as native geometry.
+| Context | Input | Action |
+| --- | --- | --- |
+| Canvas | Left-drag on seed | Move seed |
+| Canvas | CTRL + left-click / double-click | Add seed |
+| Canvas | Right-click on seed | Remove seed |
+| Canvas | Left-click on cell | Select cell |
+| Canvas | Wheel over cell | Per-cell scale |
+| Canvas | SHIFT + wheel over cell | Per-cell rotation |
+| Canvas | CTRL + wheel over cell | Cycle cell symbol |
+| Canvas | CTRL + right-drag | Zoom (anchored at cursor) |
+| Canvas | CTRL + SHIFT + right-drag | Pan |
+| Canvas | ALT + right-click | Reset view |
+| Sidebar | Wheel | Scroll (when scrollbar visible) |
 
 ## Workflow
 
-1. Open the application and choose a rendering style.
-2. Generate a random Voronoi diagram, import a closed sketch profile, or import block definitions from Solid Edge.
+1. Open the application, or open an existing `.sevproj` project.
+2. Choose a rendering style and generate a random diagram, or import a closed sketch profile from Solid Edge.
 3. Adjust cell count, seed, relaxation, scaling, offset, trim, bulge, and symbol options from the sidebar.
-4. Refine the layout by dragging seed points, and fine-tune individual symbols/blocks with the mouse wheel (Shift + wheel to rotate).
-5. Export the final geometry to SVG, DXF, or Solid Edge (optionally sending blocks as occurrences).
+4. Refine the layout: drag seeds, select cells to tune scale/rotation/symbol, and pin the cells to keep.
+5. Optionally import Solid Edge blocks and use them as cell symbols.
+6. Save the project, then export the final geometry to SVG, DXF, PNG, or Solid Edge.
 
 ## Project Structure
 
 Typical source files in the project include:
 
-- `MainForm.vb` — main UI, command flow, sketch import, and export actions.
-- `VoronoiCanvas.vb` — drawing surface, rendering logic, and interactive seed editing.
-- `VoronoiEngine.vb` — seed creation, Voronoi construction, and relaxation logic.
-- `Geometry.vb` — shared geometric helper functions.
-- `SolidEdgeExporter.vb` — Solid Edge interoperability for sketch reading and export.
-- `ExportGeometry.vb` — conversion of rendered cells into exportable paths.
-- `SvgExporter.vb` — SVG output, including selective layer export.
-- `DxfExporter.vb` — DXF output.
+- `MainForm.vb` - main UI, toolbar, project files, theming, sketch import, block library, and export actions.
+- `VoronoiCanvas.vb` - drawing surface, rendering logic, zoom/pan, selection, and interactive seed editing.
+- `VoronoiEngine.vb` - seed creation, Voronoi construction, hole clipping (Clipper2), and relaxation logic.
+- `Geometry.vb` - shared geometric helper functions.
+- `SolidEdgeExporter.vb` - Solid Edge interoperability for sketch reading, block reading, and export.
+- `ExportGeometry.vb` - conversion of rendered cells into exportable paths and block file I/O.
+
+Distribution consists of the executable plus `Clipper2Lib.dll`.
 
 ## Requirements
 
-- Windows with support for VB.NET WinForms execution.
-- Solid Edge installed and running for sketch import and direct CAD export features.
-- An active Solid Edge document with an active sketch when using sketch-boundary import.
+- Windows with .NET Framework 4.8.1.
+- `Clipper2Lib.dll` next to the executable.
+- Solid Edge installed and running for sketch import, block import, and direct CAD export features.
+- An active Solid Edge document with an active sketch when using sketch-boundary import or sketch export.
 
 ## Notes
 
