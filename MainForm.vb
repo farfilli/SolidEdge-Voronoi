@@ -15,6 +15,15 @@ Public Class MainForm
 
     Private ReadOnly sidebar As New Panel()
     Private ReadOnly sideViewport As New Panel()
+    Private ReadOnly btnProjNew As New ThemedButton()
+    Private ReadOnly btnProjOpen As New ThemedButton()
+    Private ReadOnly btnProjSave As New ThemedButton()
+
+    ' File di progetto (.sevproj): impostazioni + profilo sketch + semi + blocchi.
+    Private projectPath As String = Nothing
+    Private projectDirty As Boolean = False
+    Private loadingProject As Boolean = False
+
     Private ReadOnly topBar As New Panel()
     Private ReadOnly topBarGroupLabels As New List(Of KeyValuePair(Of Integer, String))
     Private ReadOnly topBarSeparators As New List(Of Integer)
@@ -111,15 +120,17 @@ Public Class MainForm
     End Class
 
     Public Sub New()
-        Text = "Solid Edge Voronoi Generator - v1.1"
+        ' Il titolo riporta il progetto corrente (UpdateFormTitle).
         StartPosition = FormStartPosition.CenterScreen
         Width = 1550
         Height = 920
-        MinimumSize = New Size(1280, 760)
+        MinimumSize = New Size(1380, 760)
 
         Icon = My.Resources.SE_Voronoi
         Font = New Font("Segoe UI", 9.0F)
         BackColor = UiTheme.BgCanvas
+
+        loadingProject = True
 
         ConfigureControls()
         LoadUserSettings()
@@ -160,6 +171,9 @@ Public Class MainForm
         AddHandler btnExportDxf.Click, AddressOf ExportDxf_Click
         AddHandler btnExportPng.Click, AddressOf ExportPng_Click
         AddHandler btnHelp.Click, AddressOf ShowHelp_Click
+        AddHandler btnProjNew.Click, AddressOf ProjectNew_Click
+        AddHandler btnProjOpen.Click, AddressOf ProjectOpen_Click
+        AddHandler btnProjSave.Click, AddressOf ProjectSave_Click
         AddHandler chkDarkTheme.CheckedChanged, AddressOf ThemeToggle_Changed
         AddHandler canvas.SelectedSeedChanged, AddressOf Canvas_SelectedSeedChanged
         AddHandler selScale.ValueChanged, AddressOf SelScale_Changed
@@ -194,8 +208,12 @@ Public Class MainForm
         AddHandler numSeed.ValueChanged, AddressOf GenerationParameterChanged
         AddHandler numRelax.ValueChanged, AddressOf GenerationParameterChanged
         AddHandler cmbSeedMode.SelectedIndexChanged, AddressOf GenerationParameterChanged
+        AddHandler chkExportAsBlocks.CheckedChanged, AddressOf ExportAsBlocks_Changed
 
         GenerateRandomDiagram(Nothing, EventArgs.Empty)
+
+        loadingProject = False
+        UpdateFormTitle()
     End Sub
 
     Private Sub BuildSidebar()
@@ -306,22 +324,32 @@ Public Class MainForm
         topBarGroupLabels.Clear()
         topBarSeparators.Clear()
 
+        btnProjNew.Text = "New"
+        btnProjOpen.Text = "Open"
+        btnProjSave.Text = "Save"
+
         Dim x As Integer = 12
+        x = AddTopBarGroup(x, "PROJECT",
+                           {btnProjNew, btnProjOpen, btnProjSave},
+                           {52, 56, 56})
+        topBarSeparators.Add(x)
+        x += 15
+
         x = AddTopBarGroup(x, "GENERATE",
                            {btnGenerate, btnShuffle},
-                           {92, 88})
+                           {86, 82})
         topBarSeparators.Add(x)
         x += 15
 
         x = AddTopBarGroup(x, "SKETCH && BLOCKS",
                            {btnReadSketchProfile, btnReadBlockDefaultView, btnLoadBlocks, btnSaveBlocks, btnClearBlocks, btnBlockLibrary},
-                           {108, 118, 58, 58, 58, 72})
+                           {100, 110, 52, 52, 52, 66})
         topBarSeparators.Add(x)
         x += 15
 
         x = AddTopBarGroup(x, "EXPORT",
                            {btnExportSvg, btnExportDxf, btnExportPng, btnToSolidEdge},
-                           {56, 56, 56, 112})
+                           {50, 50, 50, 106})
 
         ' Lato destro (riposizionato dal Resize): toggle tema + Help.
         chkDarkTheme.Width = 100
@@ -475,6 +503,9 @@ Public Class MainForm
         StyleButton(btnExportDxf, False)
         StyleButton(btnExportPng, False)
         StyleButton(btnHelp, False)
+        StyleButton(btnProjNew, False)
+        StyleButton(btnProjOpen, False)
+        StyleButton(btnProjSave, False)
 
         lblSelInfo.ForeColor = UiTheme.TxtDim
 
@@ -518,6 +549,14 @@ Public Class MainForm
 
         If IsHandleCreated Then
             UiTheme.ApplyTitleBarTheme(Handle)
+        End If
+
+        ' Finestre secondarie aperte: riallineate al tema.
+        If helpForm IsNot Nothing AndAlso Not helpForm.IsDisposed Then
+            helpForm.RefreshTheme()
+        End If
+        If blockLibForm IsNot Nothing AndAlso Not blockLibForm.IsDisposed Then
+            blockLibForm.RefreshTheme()
         End If
 
         canvas.Invalidate()
@@ -645,6 +684,21 @@ Public Class MainForm
         UiTheme.ApplyTitleBarTheme(Handle)
     End Sub
 
+    Protected Overrides Sub OnFormClosing(e As FormClosingEventArgs)
+        MyBase.OnFormClosing(e)
+        If e.Cancel Then Return
+
+        If projectDirty Then
+            Dim r = MessageBox.Show("Save changes to the project before closing?",
+                                    "SE-Voronoi", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question)
+            If r = DialogResult.Cancel Then
+                e.Cancel = True
+            ElseIf r = DialogResult.Yes Then
+                If Not SaveProjectInteractive() Then e.Cancel = True
+            End If
+        End If
+    End Sub
+
     Protected Overrides Sub OnFormClosed(e As FormClosedEventArgs)
         SaveUserSettings()
         Application.RemoveMessageFilter(Me)
@@ -652,6 +706,362 @@ Public Class MainForm
     End Sub
 
     ' ===== Persistenza impostazioni utente (%AppData%\SE-Voronoi\settings.txt) =====
+
+    ' ===== File di progetto (.sevproj) =====
+
+    Private Sub UpdateFormTitle()
+        Dim name As String = If(String.IsNullOrEmpty(projectPath), "Untitled",
+                                Path.GetFileNameWithoutExtension(projectPath))
+        Text = "SE-Voronoi - " & name & If(projectDirty, " *", "")
+    End Sub
+
+    Private Sub MarkProjectDirty()
+        If loadingProject Then Return
+        If Not projectDirty Then
+            projectDirty = True
+            UpdateFormTitle()
+        End If
+    End Sub
+
+    Private Sub ExportAsBlocks_Changed(sender As Object, e As EventArgs)
+        MarkProjectDirty()
+    End Sub
+
+    ' True = si puo' procedere (salvato, scartato o niente da salvare).
+    Private Function ConfirmLoseChanges() As Boolean
+        If Not projectDirty Then Return True
+
+        Dim r = MessageBox.Show("Save changes to the current project?",
+                                "SE-Voronoi", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question)
+        If r = DialogResult.Cancel Then Return False
+        If r = DialogResult.Yes Then Return SaveProjectInteractive()
+        Return True
+    End Function
+
+    Private Function SaveProjectInteractive() As Boolean
+        Dim path As String = projectPath
+
+        If String.IsNullOrEmpty(path) Then
+            Using dlg As New SaveFileDialog()
+                dlg.Title = "Save project"
+                dlg.Filter = "SE-Voronoi project (*.sevproj)|*.sevproj"
+                dlg.DefaultExt = "sevproj"
+                dlg.AddExtension = True
+                dlg.FileName = "voronoi.sevproj"
+                If dlg.ShowDialog(Me) <> DialogResult.OK Then Return False
+                path = dlg.FileName
+            End Using
+        End If
+
+        Try
+            SaveProject(path)
+            projectPath = path
+            projectDirty = False
+            UpdateFormTitle()
+            Return True
+        Catch ex As Exception
+            MessageBox.Show("Error saving project:" & Environment.NewLine & ex.Message,
+                            "SE-Voronoi", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            Return False
+        End Try
+    End Function
+
+    Private Sub ProjectSave_Click(sender As Object, e As EventArgs)
+        SaveProjectInteractive()
+    End Sub
+
+    Private Sub ProjectNew_Click(sender As Object, e As EventArgs)
+        If Not ConfirmLoseChanges() Then Return
+
+        loadingProject = True
+        Try
+            useSketchDomains = False
+            lockSketchViewDomain = False
+            currentSketchBoundaries = New List(Of List(Of Vec2))()
+            currentSketchDomains = New List(Of SketchDomainRegion)()
+            canvas.SketchBoundaries = New List(Of List(Of Vec2))()
+            canvas.SketchBoundaryIsHole = New List(Of Boolean)()
+            canvas.SketchDomains = New List(Of CanvasSketchDomain)()
+            canvas.ConstrainSeedsToSketchDomains = False
+
+            currentBlockSymbols = New List(Of BlockDefinition)()
+            canvas.BlockSymbols = currentBlockSymbols
+            If blockLibForm IsNot Nothing AndAlso Not blockLibForm.IsDisposed Then
+                blockLibForm.SetBlocks(currentBlockSymbols)
+            End If
+
+            currentWorldDomain = domain
+            canvas.Domain = currentWorldDomain
+            canvas.SelectedSeedIndex = -1
+            canvas.ResetView()
+
+            GenerateRandomDiagram(Nothing, EventArgs.Empty)
+        Finally
+            loadingProject = False
+        End Try
+
+        projectPath = Nothing
+        projectDirty = False
+        UpdateFormTitle()
+    End Sub
+
+    Private Sub ProjectOpen_Click(sender As Object, e As EventArgs)
+        If Not ConfirmLoseChanges() Then Return
+
+        Using dlg As New OpenFileDialog()
+            dlg.Title = "Open project"
+            dlg.Filter = "SE-Voronoi project (*.sevproj)|*.sevproj|All files (*.*)|*.*"
+            If dlg.ShowDialog(Me) <> DialogResult.OK Then Return
+
+            Try
+                LoadProject(dlg.FileName)
+            Catch ex As Exception
+                MessageBox.Show("Error opening project:" & Environment.NewLine & ex.Message,
+                                "SE-Voronoi", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End Try
+        End Using
+    End Sub
+
+    Private Function DInv(v As Double) As String
+        Return v.ToString("R", Globalization.CultureInfo.InvariantCulture)
+    End Function
+
+    Private Function PtsToString(pts As List(Of Vec2)) As String
+        Return String.Join(";", pts.Select(Function(p) DInv(p.X) & " " & DInv(p.Y)))
+    End Function
+
+    Private Function ParsePts(sVal As String) As List(Of Vec2)
+        Dim result As New List(Of Vec2)
+        For Each part In sVal.Split(";"c)
+            Dim xy = part.Trim().Split(" "c)
+            Dim x, y As Double
+            If xy.Length = 2 AndAlso
+               Double.TryParse(xy(0), Globalization.NumberStyles.Float, Globalization.CultureInfo.InvariantCulture, x) AndAlso
+               Double.TryParse(xy(1), Globalization.NumberStyles.Float, Globalization.CultureInfo.InvariantCulture, y) Then
+                result.Add(New Vec2(x, y))
+            End If
+        Next
+        Return result
+    End Function
+
+    Private Sub SaveProject(path As String)
+        EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
+        EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
+        EnsureSeedCellRotationCount(currentSeeds.Count)
+        EnsureSeedCellSymbolOffsetCount(currentSeeds.Count)
+        EnsureSeedPinnedCount(currentSeeds.Count)
+
+        Dim lines As New List(Of String)
+        lines.Add("#SEVPROJ 1")
+
+        lines.Add("[SETTINGS]")
+        lines.AddRange(BuildSettingsLines())
+
+        lines.Add("[SEEDS]")
+        For i As Integer = 0 To currentSeeds.Count - 1
+            lines.Add(DInv(currentSeeds(i).X) & ";" & DInv(currentSeeds(i).Y) & ";" &
+                      currentSeedStyleKeys(i).ToString(Globalization.CultureInfo.InvariantCulture) & ";" &
+                      currentSeedCellScales(i).ToString("R", Globalization.CultureInfo.InvariantCulture) & ";" &
+                      currentSeedCellRotations(i).ToString("R", Globalization.CultureInfo.InvariantCulture) & ";" &
+                      currentSeedCellSymbolOffsets(i).ToString(Globalization.CultureInfo.InvariantCulture) & ";" &
+                      currentSeedPinned(i).ToString())
+        Next
+
+        lines.Add("[SKETCH]")
+        lines.Add("UseSketch=" & useSketchDomains.ToString())
+        lines.Add("Domain=" & currentWorldDomain.Left.ToString("R", Globalization.CultureInfo.InvariantCulture) & ";" &
+                              currentWorldDomain.Top.ToString("R", Globalization.CultureInfo.InvariantCulture) & ";" &
+                              currentWorldDomain.Width.ToString("R", Globalization.CultureInfo.InvariantCulture) & ";" &
+                              currentWorldDomain.Height.ToString("R", Globalization.CultureInfo.InvariantCulture))
+
+        For i As Integer = 0 To canvas.SketchBoundaries.Count - 1
+            Dim isHole As Boolean = canvas.SketchBoundaryIsHole IsNot Nothing AndAlso
+                                    i < canvas.SketchBoundaryIsHole.Count AndAlso
+                                    canvas.SketchBoundaryIsHole(i)
+            lines.Add("LOOP;" & If(isHole, "H", "O") & ";" & PtsToString(canvas.SketchBoundaries(i)))
+        Next
+
+        For Each d In currentSketchDomains
+            lines.Add("REGION_O;" & PtsToString(d.Outer))
+            For Each h In d.Holes
+                lines.Add("REGION_H;" & PtsToString(h))
+            Next
+        Next
+
+        If currentBlockSymbols IsNot Nothing AndAlso currentBlockSymbols.Count > 0 Then
+            lines.Add("[BLOCKS]")
+            Dim tmp As String = IO.Path.GetTempFileName()
+            Try
+                ExportGeometry.SaveBlocksToFile(tmp, currentBlockSymbols)
+                lines.AddRange(File.ReadAllLines(tmp))
+            Finally
+                Try
+                    File.Delete(tmp)
+                Catch
+                End Try
+            End Try
+        End If
+
+        File.WriteAllLines(path, lines)
+    End Sub
+
+    Private Sub LoadProject(path As String)
+        Dim all() As String = File.ReadAllLines(path)
+
+        ' Il payload blocchi (formato .sevb) e' tutto cio' che segue [BLOCKS].
+        Dim blockStart As Integer = -1
+        For i As Integer = 0 To all.Length - 1
+            If all(i).Trim() = "[BLOCKS]" Then
+                blockStart = i
+                Exit For
+            End If
+        Next
+
+        Dim mainCount As Integer = If(blockStart >= 0, blockStart, all.Length)
+
+        Dim settingsMap As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
+        Dim seedLines As New List(Of String)
+        Dim useSketch As Boolean = False
+        Dim domRect As RectangleF = domain
+        Dim loopPts As New List(Of List(Of Vec2))
+        Dim loopHole As New List(Of Boolean)
+        Dim regions As New List(Of SketchDomainRegion)
+
+        Dim mode As String = ""
+        For i As Integer = 0 To mainCount - 1
+            Dim ln As String = all(i).Trim()
+            If ln.Length = 0 OrElse ln.StartsWith("#") Then Continue For
+
+            If ln = "[SETTINGS]" OrElse ln = "[SEEDS]" OrElse ln = "[SKETCH]" Then
+                mode = ln
+                Continue For
+            End If
+
+            Select Case mode
+                Case "[SETTINGS]"
+                    Dim k As Integer = ln.IndexOf("="c)
+                    If k > 0 Then settingsMap(ln.Substring(0, k).Trim()) = ln.Substring(k + 1).Trim()
+
+                Case "[SEEDS]"
+                    seedLines.Add(ln)
+
+                Case "[SKETCH]"
+                    If ln.StartsWith("UseSketch=", StringComparison.OrdinalIgnoreCase) Then
+                        Boolean.TryParse(ln.Substring(10), useSketch)
+                    ElseIf ln.StartsWith("Domain=", StringComparison.OrdinalIgnoreCase) Then
+                        Dim parts = ln.Substring(7).Split(";"c)
+                        Dim l, t, w, h As Single
+                        If parts.Length = 4 AndAlso
+                           Single.TryParse(parts(0), Globalization.NumberStyles.Float, Globalization.CultureInfo.InvariantCulture, l) AndAlso
+                           Single.TryParse(parts(1), Globalization.NumberStyles.Float, Globalization.CultureInfo.InvariantCulture, t) AndAlso
+                           Single.TryParse(parts(2), Globalization.NumberStyles.Float, Globalization.CultureInfo.InvariantCulture, w) AndAlso
+                           Single.TryParse(parts(3), Globalization.NumberStyles.Float, Globalization.CultureInfo.InvariantCulture, h) Then
+                            domRect = New RectangleF(l, t, w, h)
+                        End If
+                    ElseIf ln.StartsWith("LOOP;") Then
+                        Dim parts = ln.Split(New Char() {";"c}, 3)
+                        If parts.Length = 3 Then
+                            loopHole.Add(parts(1) = "H")
+                            loopPts.Add(ParsePts(parts(2)))
+                        End If
+                    ElseIf ln.StartsWith("REGION_O;") Then
+                        Dim r As New SketchDomainRegion()
+                        r.Outer = ParsePts(ln.Substring(9))
+                        r.Bounds = Geo2D.GetBounds(r.Outer)
+                        regions.Add(r)
+                    ElseIf ln.StartsWith("REGION_H;") Then
+                        If regions.Count > 0 Then
+                            regions(regions.Count - 1).Holes.Add(ParsePts(ln.Substring(9)))
+                        End If
+                    End If
+            End Select
+        Next
+
+        loadingProject = True
+        Try
+            ApplySettingsMap(settingsMap)
+
+            ' Blocchi: payload .sevb via file temporaneo.
+            If blockStart >= 0 AndAlso blockStart < all.Length - 1 Then
+                Dim tmp As String = IO.Path.GetTempFileName()
+                Try
+                    File.WriteAllLines(tmp, all.Skip(blockStart + 1))
+                    Dim loaded = ExportGeometry.LoadBlocksFromFile(tmp)
+                    currentBlockSymbols = If(loaded, New List(Of BlockDefinition)())
+                Finally
+                    Try
+                        File.Delete(tmp)
+                    Catch
+                    End Try
+                End Try
+            Else
+                currentBlockSymbols = New List(Of BlockDefinition)()
+            End If
+
+            canvas.BlockSymbols = currentBlockSymbols
+            If blockLibForm IsNot Nothing AndAlso Not blockLibForm.IsDisposed Then
+                blockLibForm.SetBlocks(currentBlockSymbols)
+            End If
+
+            ' Profilo sketch.
+            currentSketchBoundaries = loopPts
+            currentSketchDomains = regions
+            canvas.SketchBoundaries = New List(Of List(Of Vec2))(loopPts)
+            canvas.SketchBoundaryIsHole = New List(Of Boolean)(loopHole)
+            canvas.SketchDomains = ConvertToCanvasDomains(currentSketchDomains)
+            useSketchDomains = useSketch AndAlso currentSketchDomains.Count > 0
+            canvas.ConstrainSeedsToSketchDomains = useSketchDomains
+            canvas.ShowSketchBoundary = currentSketchBoundaries.Count > 0
+            lockSketchViewDomain = useSketchDomains
+            currentWorldDomain = domRect
+            canvas.Domain = currentWorldDomain
+
+            ' Semi con le loro proprieta' per-cella: layout esatto, nessuna rigenerazione.
+            currentSeeds = New List(Of Vec2)()
+            currentSeedStyleKeys = New List(Of Integer)()
+            currentSeedCellScales = New List(Of Single)()
+            currentSeedCellRotations = New List(Of Single)()
+            currentSeedCellSymbolOffsets = New List(Of Integer)()
+            currentSeedPinned = New List(Of Boolean)()
+
+            For Each ln In seedLines
+                Dim p = ln.Split(";"c)
+                If p.Length < 7 Then Continue For
+
+                Dim x, y As Double
+                Dim key, off As Integer
+                Dim sc, rot As Single
+                Dim pin As Boolean
+
+                If Double.TryParse(p(0), Globalization.NumberStyles.Float, Globalization.CultureInfo.InvariantCulture, x) AndAlso
+                   Double.TryParse(p(1), Globalization.NumberStyles.Float, Globalization.CultureInfo.InvariantCulture, y) AndAlso
+                   Integer.TryParse(p(2), Globalization.NumberStyles.Integer, Globalization.CultureInfo.InvariantCulture, key) AndAlso
+                   Single.TryParse(p(3), Globalization.NumberStyles.Float, Globalization.CultureInfo.InvariantCulture, sc) AndAlso
+                   Single.TryParse(p(4), Globalization.NumberStyles.Float, Globalization.CultureInfo.InvariantCulture, rot) AndAlso
+                   Integer.TryParse(p(5), Globalization.NumberStyles.Integer, Globalization.CultureInfo.InvariantCulture, off) AndAlso
+                   Boolean.TryParse(p(6), pin) Then
+
+                    currentSeeds.Add(New Vec2(x, y))
+                    currentSeedStyleKeys.Add(key)
+                    currentSeedCellScales.Add(sc)
+                    currentSeedCellRotations.Add(rot)
+                    currentSeedCellSymbolOffsets.Add(off)
+                    currentSeedPinned.Add(pin)
+                End If
+            Next
+
+            canvas.SelectedSeedIndex = -1
+            BuildFromCurrentSeeds()
+            canvas.ResetView()
+
+        Finally
+            loadingProject = False
+        End Try
+
+        projectPath = path
+        projectDirty = False
+        UpdateFormTitle()
+    End Sub
 
     Private Function SettingsPath() As String
         Dim dir As String = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SE-Voronoi")
@@ -663,28 +1073,63 @@ Public Class MainForm
         Return v.ToString(Globalization.CultureInfo.InvariantCulture)
     End Function
 
+    Private Sub ApplySettingsMap(map As Dictionary(Of String, String))
+        Dim sVal As String = Nothing
+
+        If map.TryGetValue("CellStyle", sVal) Then cmbStyle.SelectedItem = sVal
+        If map.TryGetValue("SeedMode", sVal) Then cmbSeedMode.SelectedItem = sVal
+
+        Dim iVal As Integer
+        If map.TryGetValue("VertexModeIndex", sVal) AndAlso Integer.TryParse(sVal, iVal) Then
+            cmbVertexMode.SelectedIndex = iVal
+        End If
+
+        Dim dVal As Decimal
+        If map.TryGetValue("CellCount", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numCells.Value = dVal
+        If map.TryGetValue("RandomSeed", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numSeed.Value = dVal
+        If map.TryGetValue("Relax", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numRelax.Value = dVal
+        If map.TryGetValue("CellScale", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numCellScale.Value = dVal
+        If map.TryGetValue("InnerOffset", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numInnerOffset.Value = dVal
+        If map.TryGetValue("VertexTrim", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numVertexTrim.Value = dVal
+        If map.TryGetValue("CurveWidth", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numCurveWidth.Value = dVal
+
+        Dim bVal As Boolean
+        If map.TryGetValue("FillCells", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkFill.Checked = bVal
+        If map.TryGetValue("FillSymbols", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkFillSymbols.Checked = bVal
+        If map.TryGetValue("RandomRotation", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkRandomRotation.Checked = bVal
+        If map.TryGetValue("ShowOuter", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkOuter.Checked = bVal
+        If map.TryGetValue("ShowSeeds", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkSeeds.Checked = bVal
+        If map.TryGetValue("ShowInner", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkInner.Checked = bVal
+        If map.TryGetValue("ExportAsBlocks", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkExportAsBlocks.Checked = bVal
+    End Sub
+
+    ' Impostazioni condivise tra settings utente e file di progetto.
+    Private Function BuildSettingsLines() As List(Of String)
+        Return New List(Of String) From {
+            "CellStyle=" & If(cmbStyle.SelectedItem Is Nothing, "", cmbStyle.SelectedItem.ToString()),
+            "SeedMode=" & If(cmbSeedMode.SelectedItem Is Nothing, "", cmbSeedMode.SelectedItem.ToString()),
+            "VertexModeIndex=" & cmbVertexMode.SelectedIndex.ToString(Globalization.CultureInfo.InvariantCulture),
+            "CellCount=" & FInv(numCells.Value),
+            "RandomSeed=" & FInv(numSeed.Value),
+            "Relax=" & FInv(numRelax.Value),
+            "CellScale=" & FInv(numCellScale.Value),
+            "InnerOffset=" & FInv(numInnerOffset.Value),
+            "VertexTrim=" & FInv(numVertexTrim.Value),
+            "CurveWidth=" & FInv(numCurveWidth.Value),
+            "FillCells=" & chkFill.Checked.ToString(),
+            "FillSymbols=" & chkFillSymbols.Checked.ToString(),
+            "RandomRotation=" & chkRandomRotation.Checked.ToString(),
+            "ShowOuter=" & chkOuter.Checked.ToString(),
+            "ShowSeeds=" & chkSeeds.Checked.ToString(),
+            "ShowInner=" & chkInner.Checked.ToString(),
+            "ExportAsBlocks=" & chkExportAsBlocks.Checked.ToString()
+        }
+    End Function
+
     Private Sub SaveUserSettings()
         Try
-            Dim lines As New List(Of String) From {
-                "CellStyle=" & If(cmbStyle.SelectedItem Is Nothing, "", cmbStyle.SelectedItem.ToString()),
-                "SeedMode=" & If(cmbSeedMode.SelectedItem Is Nothing, "", cmbSeedMode.SelectedItem.ToString()),
-                "VertexModeIndex=" & cmbVertexMode.SelectedIndex.ToString(Globalization.CultureInfo.InvariantCulture),
-                "CellCount=" & FInv(numCells.Value),
-                "RandomSeed=" & FInv(numSeed.Value),
-                "Relax=" & FInv(numRelax.Value),
-                "CellScale=" & FInv(numCellScale.Value),
-                "InnerOffset=" & FInv(numInnerOffset.Value),
-                "VertexTrim=" & FInv(numVertexTrim.Value),
-                "CurveWidth=" & FInv(numCurveWidth.Value),
-                "FillCells=" & chkFill.Checked.ToString(),
-                "FillSymbols=" & chkFillSymbols.Checked.ToString(),
-                "RandomRotation=" & chkRandomRotation.Checked.ToString(),
-                "ShowOuter=" & chkOuter.Checked.ToString(),
-                "ShowSeeds=" & chkSeeds.Checked.ToString(),
-                "ShowInner=" & chkInner.Checked.ToString(),
-                "ExportAsBlocks=" & chkExportAsBlocks.Checked.ToString(),
-                "DarkTheme=" & chkDarkTheme.Checked.ToString()
-            }
+            Dim lines As List(Of String) = BuildSettingsLines()
+            lines.Add("DarkTheme=" & chkDarkTheme.Checked.ToString())
 
             For Each sec In sideLayout.Controls.OfType(Of CollapsibleSection)()
                 lines.Add("Section:" & sec.SectionTitle & "=" & sec.Expanded.ToString())
@@ -706,33 +1151,10 @@ Public Class MainForm
                 If k > 0 Then map(ln.Substring(0, k).Trim()) = ln.Substring(k + 1).Trim()
             Next
 
+            ApplySettingsMap(map)
+
             Dim sVal As String = Nothing
-
-            If map.TryGetValue("CellStyle", sVal) Then cmbStyle.SelectedItem = sVal
-            If map.TryGetValue("SeedMode", sVal) Then cmbSeedMode.SelectedItem = sVal
-
-            Dim iVal As Integer
-            If map.TryGetValue("VertexModeIndex", sVal) AndAlso Integer.TryParse(sVal, iVal) Then
-                cmbVertexMode.SelectedIndex = iVal
-            End If
-
-            Dim dVal As Decimal
-            If map.TryGetValue("CellCount", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numCells.Value = dVal
-            If map.TryGetValue("RandomSeed", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numSeed.Value = dVal
-            If map.TryGetValue("Relax", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numRelax.Value = dVal
-            If map.TryGetValue("CellScale", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numCellScale.Value = dVal
-            If map.TryGetValue("InnerOffset", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numInnerOffset.Value = dVal
-            If map.TryGetValue("VertexTrim", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numVertexTrim.Value = dVal
-            If map.TryGetValue("CurveWidth", sVal) AndAlso Decimal.TryParse(sVal, Globalization.NumberStyles.Number, Globalization.CultureInfo.InvariantCulture, dVal) Then numCurveWidth.Value = dVal
-
             Dim bVal As Boolean
-            If map.TryGetValue("FillCells", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkFill.Checked = bVal
-            If map.TryGetValue("FillSymbols", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkFillSymbols.Checked = bVal
-            If map.TryGetValue("RandomRotation", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkRandomRotation.Checked = bVal
-            If map.TryGetValue("ShowOuter", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkOuter.Checked = bVal
-            If map.TryGetValue("ShowSeeds", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkSeeds.Checked = bVal
-            If map.TryGetValue("ShowInner", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkInner.Checked = bVal
-            If map.TryGetValue("ExportAsBlocks", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkExportAsBlocks.Checked = bVal
             If map.TryGetValue("DarkTheme", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then
                 chkDarkTheme.Checked = bVal
             ElseIf map.TryGetValue("LightTheme", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then
@@ -1069,6 +1491,7 @@ Public Class MainForm
         End If
 
         canvas.SelectedSeedIndex = -1
+        MarkProjectDirty()
 
         ' Semi bloccati (pin): sopravvivono alla rigenerazione con le loro
         ' proprieta' per-cella e il relax non li sposta.
@@ -1387,6 +1810,7 @@ Public Class MainForm
     'End Sub
 
     Private Sub Canvas_SeedsEdited(sender As Object, e As EventArgs)
+        MarkProjectDirty()
         currentSeeds = New List(Of Vec2)(canvas.EditableSeeds)
         currentSeedCellScales = New List(Of Single)(canvas.CellScales)
         currentSeedCellRotations = New List(Of Single)(canvas.CellRotations)
@@ -1404,6 +1828,7 @@ Public Class MainForm
     End Sub
 
     Private Sub Canvas_SeedScalesEdited(sender As Object, e As EventArgs)
+        MarkProjectDirty()
         currentSeedCellScales = New List(Of Single)(canvas.CellScales)
         EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
         canvas.CellScales = New List(Of Single)(currentSeedCellScales)
@@ -1412,6 +1837,7 @@ Public Class MainForm
     End Sub
 
     Private Sub Canvas_SeedRotationsEdited(sender As Object, e As EventArgs)
+        MarkProjectDirty()
         currentSeedCellRotations = New List(Of Single)(canvas.CellRotations)
         EnsureSeedCellRotationCount(currentSeeds.Count)
         canvas.CellRotations = New List(Of Single)(currentSeedCellRotations)
@@ -1420,6 +1846,7 @@ Public Class MainForm
     End Sub
 
     Private Sub Canvas_SeedSymbolOffsetsEdited(sender As Object, e As EventArgs)
+        MarkProjectDirty()
         currentSeedCellSymbolOffsets = New List(Of Integer)(canvas.CellSymbolOffsets)
         EnsureSeedCellSymbolOffsetCount(currentSeeds.Count)
         canvas.CellSymbolOffsets = New List(Of Integer)(currentSeedCellSymbolOffsets)
@@ -1483,6 +1910,7 @@ Public Class MainForm
     Private Sub SelScale_Changed(sender As Object, e As EventArgs)
         Dim idx As Integer = SelectedIndexForEdit()
         If idx < 0 Then Return
+        MarkProjectDirty()
 
         EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
         currentSeedCellScales(idx) = CSng(selScale.Value)
@@ -1493,6 +1921,7 @@ Public Class MainForm
     Private Sub SelRotation_Changed(sender As Object, e As EventArgs)
         Dim idx As Integer = SelectedIndexForEdit()
         If idx < 0 Then Return
+        MarkProjectDirty()
 
         EnsureSeedCellRotationCount(currentSeeds.Count)
         currentSeedCellRotations(idx) = CSng(selRotation.Value)
@@ -1503,6 +1932,7 @@ Public Class MainForm
     Private Sub SelSymbolOffset_Changed(sender As Object, e As EventArgs)
         Dim idx As Integer = SelectedIndexForEdit()
         If idx < 0 Then Return
+        MarkProjectDirty()
 
         EnsureSeedCellSymbolOffsetCount(currentSeeds.Count)
         currentSeedCellSymbolOffsets(idx) = CInt(selSymbolOffset.Value)
@@ -1513,6 +1943,7 @@ Public Class MainForm
     Private Sub SelPinned_Changed(sender As Object, e As EventArgs)
         Dim idx As Integer = SelectedIndexForEdit()
         If idx < 0 Then Return
+        MarkProjectDirty()
 
         EnsureSeedPinnedCount(currentSeeds.Count)
         currentSeedPinned(idx) = chkSelPinned.Checked
@@ -1697,6 +2128,7 @@ Public Class MainForm
     'End Sub
 
     Private Sub RefreshCanvasOptions(sender As Object, e As EventArgs)
+        MarkProjectDirty()
         ' Lo slider globale Cell Scale agisce come fattore moltiplicativo LIVE sui
         ' valori per-cella: aggiorna subito, mantiene le differenze relative editate
         ' e non resetta ai default.
@@ -1866,6 +2298,8 @@ Public Class MainForm
             ApplyOptions()
             canvas.Invalidate()
 
+            MarkProjectDirty()
+
             If useSketchDomains Then
                 GenerateDiagramFromSketchDomains()
             Else
@@ -2022,10 +2456,12 @@ Public Class MainForm
             If Not String.IsNullOrEmpty(b.Name) Then existing.Add(b.Name)
             added += 1
         Next
+        If added > 0 Then MarkProjectDirty()
         Return added
     End Function
 
     Private Sub ClearBlocks_Click(sender As Object, e As EventArgs)
+        MarkProjectDirty()
         If currentBlockSymbols Is Nothing OrElse currentBlockSymbols.Count = 0 Then
             MessageBox.Show("No blocks in memory.", "Clear Blocks", MessageBoxButtons.OK, MessageBoxIcon.Information)
             Return
@@ -2069,6 +2505,7 @@ Public Class MainForm
 
     ' La galleria ha rimosso un blocco dalla lista condivisa: aggiorna il canvas.
     Private Sub BlockLibrary_BlocksChanged(sender As Object, e As EventArgs)
+        MarkProjectDirty()
         canvas.BlockSymbols = currentBlockSymbols
         If currentBlockSymbols.Count = 0 AndAlso cmbStyle.SelectedItem IsNot Nothing AndAlso
            cmbStyle.SelectedItem.ToString() = CellRenderStyle.BlockSymbol.ToString() Then
@@ -2274,6 +2711,7 @@ Public Class MainForm
     End Sub
 
     Private Sub GenerationParameterChanged(sender As Object, e As EventArgs)
+        MarkProjectDirty()
         GenerateRandomDiagram(sender, e)
     End Sub
 
@@ -2389,6 +2827,9 @@ Public Class BlockLibraryForm
 
     Private ReadOnly header As New Label()
     Private ReadOnly flow As New BufferedFlowLayoutPanel()
+    Private ReadOnly viewport As New Panel()
+    Private ReadOnly libScroll As New ThemedVScrollBar()
+    Private wheelFilter As WheelToScrollFilter = Nothing
     Private blocks As List(Of BlockDefinition) = Nothing
     Public Property FillSymbols As Boolean = False
     Public Property StrokeWidth As Single = 1.8F
@@ -2407,9 +2848,6 @@ Public Class BlockLibraryForm
     End Class
 
     Private Const ThumbPx As Integer = 120
-    Private ReadOnly accent As Color = Color.FromArgb(0, 188, 212)
-    Private ReadOnly bg As Color = Color.FromArgb(8, 6, 53)
-    Private ReadOnly tileBg As Color = Color.FromArgb(18, 16, 70)
 
     Public Sub New()
         Text = "Block Library"
@@ -2418,28 +2856,95 @@ Public Class BlockLibraryForm
         Width = 720
         Height = 560
         MinimumSize = New Size(360, 320)
-        BackColor = bg
-        ForeColor = Color.White
 
         header.Dock = DockStyle.Top
         header.Height = 28
         header.TextAlign = ContentAlignment.MiddleLeft
         header.Padding = New Padding(8, 0, 0, 0)
-        header.ForeColor = Color.White
         header.Text = "0 blocks in memory"
 
-        flow.Dock = DockStyle.Fill
-        flow.AutoScroll = True
-        flow.BackColor = bg
+        ' Scrolling con la scrollbar custom (stessa della sidebar):
+        ' il flow cresce in altezza dentro un viewport e viene traslato.
+        flow.AutoScroll = False
+        flow.AutoSize = True
+        flow.AutoSizeMode = AutoSizeMode.GrowAndShrink
+        flow.WrapContents = True
         flow.Padding = New Padding(8)
+        flow.Location = New Point(0, 0)
 
-        Controls.Add(flow)
+        viewport.Dock = DockStyle.Fill
+        viewport.Controls.Add(flow)
+
+        libScroll.Dock = DockStyle.Right
+        AddHandler libScroll.ScrollChanged, Sub(sc, ev) flow.Top = -libScroll.Value
+        AddHandler viewport.Resize, AddressOf Viewport_Resize
+        AddHandler flow.SizeChanged, Sub(sc, ev) UpdateLibScroll()
+
+        ApplyChromeColors()
+
+        Controls.Add(viewport)
+        Controls.Add(libScroll)
         Controls.Add(header)
+    End Sub
+
+    Private Sub Viewport_Resize(sender As Object, e As EventArgs)
+        Dim w As Integer = Math.Max(60, viewport.ClientSize.Width)
+        flow.MinimumSize = New Size(w, 0)
+        flow.MaximumSize = New Size(w, 0)
+        UpdateLibScroll()
+    End Sub
+
+    Private Sub UpdateLibScroll()
+        libScroll.ContentSize = flow.Height
+        libScroll.ViewportSize = viewport.ClientSize.Height
+        Dim needed As Boolean = flow.Height > viewport.ClientSize.Height
+        libScroll.Visible = needed
+        If Not needed Then
+            libScroll.Value = 0
+            flow.Top = 0
+        End If
+    End Sub
+
+    ' Chrome della finestra a tema; le anteprime restano su fondo navy
+    ' (come il canvas: i colori dei blocchi sono tarati su di esso).
+    Private Sub ApplyChromeColors()
+        BackColor = UiTheme.BgSidebar
+        ForeColor = UiTheme.Txt
+        header.ForeColor = UiTheme.Txt
+        header.BackColor = UiTheme.BgSidebar
+        flow.BackColor = UiTheme.BgSidebar
+        viewport.BackColor = UiTheme.BgSidebar
+        libScroll.BackColor = UiTheme.BgSidebar
+    End Sub
+
+    ' Riapplica il tema corrente (chiamata dal toggle se la finestra e' aperta).
+    Public Sub RefreshTheme()
+        ApplyChromeColors()
+        If IsHandleCreated Then
+            UiTheme.ApplyTitleBarTheme(Handle)
+        End If
+        RebuildTiles()
+        Refresh()
     End Sub
 
     Protected Overrides Sub OnLoad(e As EventArgs)
         MyBase.OnLoad(e)
         UiTheme.ApplyTitleBarTheme(Handle)
+        Viewport_Resize(viewport, EventArgs.Empty)
+        wheelFilter = New WheelToScrollFilter(viewport, libScroll)
+        Application.AddMessageFilter(wheelFilter)
+    End Sub
+
+    Protected Overrides Sub OnFormClosed(e As FormClosedEventArgs)
+        If wheelFilter IsNot Nothing Then
+            Application.RemoveMessageFilter(wheelFilter)
+        End If
+
+        For Each c As Control In flow.Controls
+            DisposeTile(c)
+        Next
+        MyBase.OnFormClosed(e)
+
     End Sub
 
     Public Sub SetBlocks(list As List(Of BlockDefinition))
@@ -2497,14 +3002,14 @@ Public Class BlockLibraryForm
         tile.Width = ThumbPx + 16
         tile.Height = ThumbPx + 52
         tile.Margin = New Padding(6)
-        tile.BackColor = tileBg
+        tile.BackColor = UiTheme.BgField
 
         Dim pic As New PictureBox()
         pic.Width = ThumbPx
         pic.Height = ThumbPx
         pic.Left = 8
         pic.Top = 6
-        pic.BackColor = bg
+        pic.BackColor = If(UiTheme.IsDark, UiTheme.BgCanvas, Color.White)
         pic.SizeMode = PictureBoxSizeMode.Normal
         pic.Image = RenderThumb(def, ThumbPx)
         tile.Controls.Add(pic)
@@ -2516,24 +3021,23 @@ Public Class BlockLibraryForm
         lbl.Height = 16
         lbl.Left = 8
         lbl.Top = ThumbPx + 8
-        lbl.ForeColor = Color.White
+        lbl.ForeColor = UiTheme.Txt
+        lbl.BackColor = UiTheme.BgField
         lbl.TextAlign = ContentAlignment.MiddleCenter
         lbl.AutoEllipsis = True
         tile.Controls.Add(lbl)
 
-        Dim btnDel As New Button()
+        Dim btnDel As New ThemedButton()
         btnDel.Text = "Remove"
         btnDel.Width = ThumbPx
         btnDel.Height = 22
         btnDel.Left = 8
         btnDel.Top = ThumbPx + 26
-        btnDel.FlatStyle = FlatStyle.Flat
         btnDel.BackColor = UiTheme.BgField
         btnDel.ForeColor = UiTheme.Txt
         btnDel.FlatAppearance.BorderColor = UiTheme.Border
-        btnDel.FlatAppearance.BorderSize = 1
         btnDel.FlatAppearance.MouseOverBackColor = UiTheme.BgFieldHi
-        btnDel.Cursor = Cursors.Hand
+        btnDel.FlatAppearance.MouseDownBackColor = UiTheme.Border
         Dim target As BlockDefinition = def
         AddHandler btnDel.Click, Sub(s, e) RemoveBlock(target)
         tile.Controls.Add(btnDel)
@@ -2552,7 +3056,10 @@ Public Class BlockLibraryForm
         Dim bmp As New Bitmap(sz, sz)
         Using g As Graphics = Graphics.FromImage(bmp)
             g.SmoothingMode = SmoothingMode.AntiAlias
-            g.Clear(bg)
+            g.Clear(If(UiTheme.IsDark, UiTheme.BgCanvas, Color.White))
+
+            ' Inchiostro dal tema: ciano pieno su navy, teal scuro su bianco.
+            Dim ink As Color = UiTheme.Accent
 
             Dim polys = ExportGeometry.FlattenBlockPaths(def)
             If polys Is Nothing OrElse polys.Count = 0 Then Return bmp
@@ -2593,14 +3100,14 @@ Public Class BlockLibraryForm
                             Next
                             gp.AddPolygon(fp)
                         Next
-                        Using br As New SolidBrush(Color.FromArgb(235, accent.R, accent.G, accent.B))
+                        Using br As New SolidBrush(Color.FromArgb(235, ink.R, ink.G, ink.B))
                             g.FillPath(br, gp)
                         End Using
                     End Using
                 End If
             End If
 
-            Using pen As New Pen(accent, Math.Max(0.5F, StrokeWidth))
+            Using pen As New Pen(ink, Math.Max(0.5F, StrokeWidth))
                 pen.LineJoin = LineJoin.Round
                 pen.StartCap = LineCap.Round
                 pen.EndCap = LineCap.Round
@@ -2619,18 +3126,49 @@ Public Class BlockLibraryForm
         Return bmp
     End Function
 
-    Protected Overrides Sub OnFormClosed(e As FormClosedEventArgs)
-        For Each c As Control In flow.Controls
-            DisposeTile(c)
-        Next
-        MyBase.OnFormClosed(e)
-    End Sub
+
 End Class
 
 
 ' ============================================================
 '  Palette del tema scuro dell'applicazione.
 ' ============================================================
+
+' ============================================================
+'  Inoltra la rotella del mouse a una ThemedVScrollBar quando il cursore
+'  e' sopra l'area indicata e la sua finestra e' attiva.
+' ============================================================
+Public Class WheelToScrollFilter
+    Implements IMessageFilter
+
+    Private ReadOnly area As Control
+    Private ReadOnly bar As ThemedVScrollBar
+
+    Public Sub New(scrollArea As Control, scrollBar As ThemedVScrollBar)
+        area = scrollArea
+        bar = scrollBar
+    End Sub
+
+    Public Function PreFilterMessage(ByRef m As Message) As Boolean Implements IMessageFilter.PreFilterMessage
+        Const WM_MOUSEWHEEL As Integer = &H20A
+        If m.Msg <> WM_MOUSEWHEEL Then Return False
+        If area Is Nothing OrElse Not area.IsHandleCreated OrElse Not area.Visible Then Return False
+
+        Dim owner As Form = area.FindForm()
+        If owner Is Nothing OrElse Form.ActiveForm IsNot owner Then Return False
+
+        Dim pos As Point = Control.MousePosition
+        If Not area.RectangleToScreen(area.ClientRectangle).Contains(pos) Then Return False
+
+        If bar IsNot Nothing AndAlso bar.Visible Then
+            Dim raw As Integer = CInt((m.WParam.ToInt64() >> 16) And &HFFFF&)
+            If raw >= &H8000 Then raw -= &H10000
+            bar.Value -= Math.Sign(raw) * 60
+        End If
+        Return True
+    End Function
+End Class
+
 Public NotInheritable Class UiTheme
     Private Sub New()
     End Sub
@@ -2683,6 +3221,18 @@ Public NotInheritable Class UiTheme
     <Runtime.InteropServices.DllImport("user32.dll")>
     Private Shared Function SetWindowPos(hWnd As IntPtr, hWndAfter As IntPtr, x As Integer, y As Integer, cx As Integer, cy As Integer, flags As UInteger) As Boolean
     End Function
+
+    <Runtime.InteropServices.DllImport("uxtheme.dll", CharSet:=Runtime.InteropServices.CharSet.Unicode)>
+    Private Shared Function SetWindowTheme(hWnd As IntPtr, pszSubAppName As String, pszSubIdList As String) As Integer
+    End Function
+
+    ' Scrollbar native (RichTextBox, AutoScroll) scure o chiare secondo il tema.
+    Public Shared Sub ApplyScrollBarTheme(handle As IntPtr)
+        Try
+            SetWindowTheme(handle, If(IsDark, "DarkMode_Explorer", "Explorer"), Nothing)
+        Catch
+        End Try
+    End Sub
 
     ' Applica alla barra del titolo i colori del tema corrente (Win10 1809+/11).
     Public Shared Sub ApplyTitleBarTheme(handle As IntPtr)
@@ -3849,6 +4399,11 @@ End Class
 Public Class HelpForm
     Inherits Form
 
+    Private ReadOnly rtb As New RichTextBox()
+    Private ReadOnly host As New Panel()
+    Private ReadOnly helpScroll As New ThemedVScrollBar()
+    Private wheelFilter As WheelToScrollFilter = Nothing
+
     Public Sub New()
         Text = "SE-Voronoi - Help"
         StartPosition = FormStartPosition.CenterParent
@@ -3863,33 +4418,90 @@ Public Class HelpForm
         Catch
         End Try
 
-        Dim host As New Panel With {
-            .Dock = DockStyle.Fill,
-            .Padding = New Padding(16, 12, 16, 12),
-            .BackColor = UiTheme.BgSidebar
-        }
+        ' Il RichTextBox non scrolla da solo: viene reso alto quanto il suo
+        ' contenuto (ContentsResized) e traslato dalla scrollbar custom.
+        host.Dock = DockStyle.Fill
 
-        Dim rtb As New RichTextBox With {
-            .Dock = DockStyle.Fill,
-            .ReadOnly = True,
-            .BorderStyle = BorderStyle.None,
-            .BackColor = UiTheme.BgSidebar,
-            .ForeColor = UiTheme.Txt,
-            .DetectUrls = False,
-            .TabStop = False
-        }
+        rtb.ReadOnly = True
+        rtb.BorderStyle = BorderStyle.None
+        rtb.DetectUrls = False
+        rtb.TabStop = False
+        rtb.ScrollBars = RichTextBoxScrollBars.None
+        rtb.WordWrap = True
+        rtb.Location = New Point(16, 12)
+
+        helpScroll.Dock = DockStyle.Right
+        AddHandler helpScroll.ScrollChanged, Sub(sc, ev) rtb.Top = 12 - helpScroll.Value
+        AddHandler host.Resize, AddressOf Host_Resize
+        AddHandler rtb.ContentsResized, AddressOf Rtb_ContentsResized
 
         host.Controls.Add(rtb)
         Controls.Add(host)
+        Controls.Add(helpScroll)
 
+        ApplyChromeColors()
         BuildContent(rtb)
         rtb.SelectionStart = 0
         rtb.SelectionLength = 0
     End Sub
 
+    Private Sub Host_Resize(sender As Object, e As EventArgs)
+        rtb.Width = Math.Max(120, host.ClientSize.Width - 32)
+        UpdateHelpScroll()
+    End Sub
+
+    Private Sub Rtb_ContentsResized(sender As Object, e As ContentsResizedEventArgs)
+        rtb.Height = e.NewRectangle.Height + 16
+        UpdateHelpScroll()
+    End Sub
+
+    Private Sub UpdateHelpScroll()
+        Dim contentH As Integer = rtb.Height + 24   ' margini sopra/sotto
+        helpScroll.ContentSize = contentH
+        helpScroll.ViewportSize = host.ClientSize.Height
+        Dim needed As Boolean = contentH > host.ClientSize.Height
+        helpScroll.Visible = needed
+        If Not needed Then
+            helpScroll.Value = 0
+            rtb.Top = 12
+        End If
+    End Sub
+
+    Private Sub ApplyChromeColors()
+        BackColor = UiTheme.BgSidebar
+        host.BackColor = UiTheme.BgSidebar
+        rtb.BackColor = UiTheme.BgSidebar
+        rtb.ForeColor = UiTheme.Txt
+        helpScroll.BackColor = UiTheme.BgSidebar
+    End Sub
+
+    ' Riapplica il tema corrente (chiamata dal toggle se la finestra e' aperta):
+    ' i colori del testo sono nel contenuto, quindi va ricostruito.
+    Public Sub RefreshTheme()
+        ApplyChromeColors()
+        rtb.Clear()
+        BuildContent(rtb)
+        rtb.SelectionStart = 0
+        rtb.SelectionLength = 0
+        If IsHandleCreated Then
+            UiTheme.ApplyTitleBarTheme(Handle)
+        End If
+        Refresh()
+    End Sub
+
     Protected Overrides Sub OnLoad(e As EventArgs)
         MyBase.OnLoad(e)
         UiTheme.ApplyTitleBarTheme(Handle)
+        Host_Resize(host, EventArgs.Empty)
+        wheelFilter = New WheelToScrollFilter(host, helpScroll)
+        Application.AddMessageFilter(wheelFilter)
+    End Sub
+
+    Protected Overrides Sub OnFormClosed(e As FormClosedEventArgs)
+        If wheelFilter IsNot Nothing Then
+            Application.RemoveMessageFilter(wheelFilter)
+        End If
+        MyBase.OnFormClosed(e)
     End Sub
 
     Private Sub Heading(rtb As RichTextBox, text As String)
@@ -3933,13 +4545,25 @@ Public Class HelpForm
         Item(rtb, "Click a section header", "collapse / expand the section")
         Gap(rtb)
 
+        Heading(rtb, "TOOLBAR")
+        Item(rtb, "New / Open / Save", "project files (.sevproj): settings, sketch profile, seeds with per-cell properties and blocks, all in one file; the title bar shows the open project (* = unsaved changes) and closing prompts to save")
+        Item(rtb, "Generate / New Seed", "rebuild the diagram; New Seed increments Random Seed first")
+        Item(rtb, "Read Sketch", "reads the active Solid Edge sketch as the generation domain (holes supported)")
+        Item(rtb, "Read SE Blocks", "imports block definitions from the document (additive, deduplicated by name)")
+        Item(rtb, "Load / Save / Clear", "block library files (.sevb); Clear empties the memory")
+        Item(rtb, "Library", "preview gallery of loaded blocks, with per-block removal")
+        Item(rtb, "SVG / DXF", "vector output of the current geometry")
+        Item(rtb, "PNG", "2000 px image of the whole domain (ignores zoom/pan)")
+        Item(rtb, "To Solid Edge", "draws into the active sketch (missing block definitions are created)")
+        Item(rtb, "Dark theme / Help", "right side of the toolbar: palette toggle and this window")
+        Gap(rtb)
+
         Heading(rtb, "GENERATION")
         Item(rtb, "Seed Placement", "seed distribution: Random; RandomNearBorders / RandomFarBorders (weighted); CircularGrid (concentric rings); RectangularGrid and Staggered (odd rows shifted half a step)")
         Item(rtb, "Cell Count", "requested number of seeds (grid patterns approximate it)")
         Item(rtb, "Random Seed", "generator seed: the same number reproduces the same pattern")
         Item(rtb, "Relax", "Lloyd relaxation iterations, evens out cell sizes (0 keeps patterns exact)")
         Item(rtb, "Cell Scale", "global symbol size relative to each cell")
-        Item(rtb, "Generate / New Seed", "rebuild the diagram; New Seed increments Random Seed first")
         Gap(rtb)
 
         Heading(rtb, "STYLE")
@@ -3963,18 +4587,8 @@ Public Class HelpForm
         Item(rtb, "Show outer edges / seeds / inner curve", "visibility toggles; they also affect PNG export")
         Gap(rtb)
 
-        Heading(rtb, "SKETCH & BLOCKS")
-        Item(rtb, "Read Sketch", "reads the active Solid Edge sketch as the generation domain (holes supported)")
-        Item(rtb, "Read SE Blocks", "imports block definitions from the document (additive, deduplicated by name)")
-        Item(rtb, "Load / Save / Clear", "block library files (.sevb); Clear empties the memory")
-        Item(rtb, "Library", "preview gallery of loaded blocks, with per-block removal")
-        Gap(rtb)
-
-        Heading(rtb, "EXPORT")
-        Item(rtb, "SVG / DXF", "vector output of the current geometry")
-        Item(rtb, "PNG", "2000 px image of the whole domain (ignores zoom/pan)")
-        Item(rtb, "To SE as blocks", "emits block occurrences instead of raw geometry")
-        Item(rtb, "To Solid Edge", "draws into the active sketch (missing block definitions are created)")
+        Heading(rtb, "EXPORT (SIDEBAR)")
+        Item(rtb, "To SE as blocks", "emits block occurrences instead of raw geometry when sending to Solid Edge")
         Gap(rtb)
 
         Heading(rtb, "STATUS BAR")
