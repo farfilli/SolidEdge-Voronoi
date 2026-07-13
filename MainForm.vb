@@ -62,6 +62,9 @@ Public Class MainForm
     Private ReadOnly chkInner As New ThemedCheckBox()
     Private ReadOnly chkRandomRotation As New ThemedCheckBox()
     Private ReadOnly chkExportAsBlocks As New ThemedCheckBox()
+    Private ReadOnly chkPeriodicX As New ThemedCheckBox()
+    Private ReadOnly chkPeriodicY As New ThemedCheckBox()
+    Private ReadOnly chkFullSeamCells As New ThemedCheckBox()
 
     Private ReadOnly btnGenerate As New ThemedButton()
     Private ReadOnly btnShuffle As New ThemedButton()
@@ -206,12 +209,16 @@ Public Class MainForm
         AddHandler canvas.SeedScalesEdited, AddressOf Canvas_SeedScalesEdited
         AddHandler canvas.SeedRotationsEdited, AddressOf Canvas_SeedRotationsEdited
         AddHandler canvas.SeedSymbolOffsetsEdited, AddressOf Canvas_SeedSymbolOffsetsEdited
+        AddHandler canvas.SeedColorsEdited, AddressOf Canvas_SeedColorsEdited
 
         AddHandler numCells.ValueChanged, AddressOf GenerationParameterChanged
         AddHandler numSeed.ValueChanged, AddressOf GenerationParameterChanged
         AddHandler numRelax.ValueChanged, AddressOf GenerationParameterChanged
         AddHandler cmbSeedMode.SelectedIndexChanged, AddressOf GenerationParameterChanged
         AddHandler chkExportAsBlocks.CheckedChanged, AddressOf ExportAsBlocks_Changed
+        AddHandler chkPeriodicX.CheckedChanged, AddressOf GenerationParameterChanged
+        AddHandler chkPeriodicY.CheckedChanged, AddressOf GenerationParameterChanged
+        AddHandler chkFullSeamCells.CheckedChanged, AddressOf GenerationParameterChanged
 
         GenerateRandomDiagram(Nothing, EventArgs.Empty)
 
@@ -270,6 +277,9 @@ Public Class MainForm
              "Random Seed", numSeed)
         AddDoubleRow("Relax", numRelax,
              "Cell Scale", numCellScale)
+        AddDoubleRow("", chkPeriodicX,
+             "", chkPeriodicY, 22)
+        AddRowControl(chkFullSeamCells, 22)
         ' ===== STYLE =====
         curSection = NewSection("STYLE", True)
         AddRowTitle("Cell Style")
@@ -520,7 +530,7 @@ Public Class MainForm
 
         lblSelInfo.ForeColor = UiTheme.TxtDim
 
-        For Each chk In New CheckBox() {chkFill, chkFillSymbols, chkOuter, chkSeeds, chkInner, chkRandomRotation, chkExportAsBlocks, chkDarkTheme, chkSelPinned}
+        For Each chk In New CheckBox() {chkFill, chkFillSymbols, chkOuter, chkSeeds, chkInner, chkRandomRotation, chkExportAsBlocks, chkDarkTheme, chkSelPinned, chkPeriodicX, chkPeriodicY, chkFullSeamCells}
             chk.ForeColor = UiTheme.Txt
             chk.BackColor = UiTheme.BgSidebar
         Next
@@ -1121,6 +1131,9 @@ Public Class MainForm
         If map.TryGetValue("ShowSeeds", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkSeeds.Checked = bVal
         If map.TryGetValue("ShowInner", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkInner.Checked = bVal
         If map.TryGetValue("ExportAsBlocks", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkExportAsBlocks.Checked = bVal
+        If map.TryGetValue("PeriodicX", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkPeriodicX.Checked = bVal
+        If map.TryGetValue("PeriodicY", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkPeriodicY.Checked = bVal
+        If map.TryGetValue("FullSeamCells", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkFullSeamCells.Checked = bVal
     End Sub
 
     ' Impostazioni condivise tra settings utente e file di progetto.
@@ -1142,7 +1155,10 @@ Public Class MainForm
             "ShowOuter=" & chkOuter.Checked.ToString(),
             "ShowSeeds=" & chkSeeds.Checked.ToString(),
             "ShowInner=" & chkInner.Checked.ToString(),
-            "ExportAsBlocks=" & chkExportAsBlocks.Checked.ToString()
+            "ExportAsBlocks=" & chkExportAsBlocks.Checked.ToString(),
+            "PeriodicX=" & chkPeriodicX.Checked.ToString(),
+            "PeriodicY=" & chkPeriodicY.Checked.ToString(),
+            "FullSeamCells=" & chkFullSeamCells.Checked.ToString()
         }
     End Function
 
@@ -1361,6 +1377,13 @@ Public Class MainForm
         selSymbolOffset.Value = 0D
         selSymbolOffset.Enabled = False
 
+        chkPeriodicX.Text = "Periodic X (cylinder)"
+        chkPeriodicX.Checked = False
+        chkPeriodicY.Text = "Periodic Y"
+        chkPeriodicY.Checked = False
+        chkFullSeamCells.Text = "Full boundary cells"
+        chkFullSeamCells.Checked = False
+
         chkSelPinned.Text = "Pin seed"
         chkSelPinned.Enabled = False
 
@@ -1568,8 +1591,15 @@ Public Class MainForm
         Next
 
         For i As Integer = 1 To CInt(numRelax.Value)
-            Dim tmpCells = VoronoiEngine.BuildCells(currentSeeds, domain)
+            Dim tmpCells As List(Of VoronoiCell)
+            If PeriodicXActive() OrElse PeriodicYActive() Then
+                ' Relax periodico: centroidi su celle intere, poi wrap nel dominio.
+                tmpCells = VoronoiPeriodic.BuildCellsPeriodic(currentSeeds, domain, PeriodicXActive(), PeriodicYActive(), True)
+            Else
+                tmpCells = VoronoiEngine.BuildCells(currentSeeds, domain)
+            End If
             currentSeeds = VoronoiEngine.RelaxSeeds(tmpCells)
+            VoronoiPeriodic.WrapSeedsIntoBounds(currentSeeds, domain, PeriodicXActive(), PeriodicYActive())
 
             ' I semi pinnati (prefisso) tornano alla loro posizione.
             For k As Integer = 0 To pinPos.Count - 1
@@ -1821,7 +1851,14 @@ Public Class MainForm
                 regionPinned = filteredPinned
             Next
 
-            Dim cells = VoronoiEngine.BuildCells(seeds, d.Outer, d.Holes)
+            Dim cells As List(Of VoronoiCell)
+            If chkFullSeamCells.Checked Then
+                ' Celle intere: nessun taglio su profilo e fori (il bordo
+                ' lontano viene chiuso su un margine oltre la regione).
+                cells = VoronoiPeriodic.BuildCellsPeriodic(seeds, d.Bounds, False, False, True)
+            Else
+                cells = VoronoiEngine.BuildCells(seeds, d.Outer, d.Holes)
+            End If
 
             allSeeds.AddRange(seeds)
             allCells.AddRange(cells)
@@ -1894,6 +1931,15 @@ Public Class MainForm
         currentSeedCellRotations = New List(Of Single)(canvas.CellRotations)
         EnsureSeedCellRotationCount(currentSeeds.Count)
         canvas.CellRotations = New List(Of Single)(currentSeedCellRotations)
+        canvas.Invalidate()
+        LoadSelectionPanel()
+    End Sub
+
+    Private Sub Canvas_SeedColorsEdited(sender As Object, e As EventArgs)
+        MarkProjectDirty()
+        currentSeedCellColors = New List(Of Integer)(canvas.CellColorIndices)
+        EnsureSeedCellColorCount(currentSeeds.Count)
+        canvas.CellColorIndices = New List(Of Integer)(currentSeedCellColors)
         canvas.Invalidate()
         LoadSelectionPanel()
     End Sub
@@ -2130,7 +2176,12 @@ Public Class MainForm
 
                 If seedsInDomain.Count = 0 Then Continue For
 
-                Dim cells = VoronoiEngine.BuildCells(seedsInDomain, d.Outer, d.Holes)
+                Dim cells As List(Of VoronoiCell)
+                If chkFullSeamCells.Checked Then
+                    cells = VoronoiPeriodic.BuildCellsPeriodic(seedsInDomain, d.Bounds, False, False, True)
+                Else
+                    cells = VoronoiEngine.BuildCells(seedsInDomain, d.Outer, d.Holes)
+                End If
 
                 allSeeds.AddRange(seedsInDomain)
                 allStyleKeys.AddRange(keysInDomain)
@@ -2165,7 +2216,14 @@ Public Class MainForm
                 canvas.SelectedSeedIndex = newSel
             End If
         Else
-            Dim cells = VoronoiEngine.BuildCells(currentSeeds, domain)
+            Dim cells As List(Of VoronoiCell)
+            If PeriodicXActive() OrElse PeriodicYActive() OrElse chkFullSeamCells.Checked Then
+                cells = VoronoiPeriodic.BuildCellsPeriodic(currentSeeds, domain,
+                                                           PeriodicXActive(), PeriodicYActive(),
+                                                           chkFullSeamCells.Checked)
+            Else
+                cells = VoronoiEngine.BuildCells(currentSeeds, domain)
+            End If
             canvas.Cells = cells
             canvas.EditableSeeds = New List(Of Vec2)(currentSeeds)
         End If
@@ -2791,6 +2849,14 @@ Public Class MainForm
             currentSeedStyleKeys.RemoveAt(currentSeedStyleKeys.Count - 1)
         End While
     End Sub
+
+    Private Function PeriodicXActive() As Boolean
+        Return chkPeriodicX.Checked AndAlso Not useSketchDomains
+    End Function
+
+    Private Function PeriodicYActive() As Boolean
+        Return chkPeriodicY.Checked AndAlso Not useSketchDomains
+    End Function
 
     Private Sub GenerationParameterChanged(sender As Object, e As EventArgs)
         MarkProjectDirty()
@@ -4632,6 +4698,7 @@ Public Class HelpForm
         Item(rtb, "Wheel over a cell", "scale that cell's symbol/block")
         Item(rtb, "Shift+Wheel", "rotate that cell's symbol/block")
         Item(rtb, "Ctrl+Wheel", "cycle to the next/previous symbol or block (per cell, persistent)")
+        Item(rtb, "Alt+Wheel", "cycle the cell color: Auto + the named palette (any style, persistent)")
         Item(rtb, "Ctrl+Right drag", "zoom, Solid Edge style: forward = zoom out, backward = zoom in; anchored at the cursor")
         Item(rtb, "Ctrl+Shift+Right drag", "pan; press/release Shift during the drag to switch between zoom and pan")
         Item(rtb, "Alt+Right click", "reset the view (fit to domain)")
@@ -4663,6 +4730,8 @@ Public Class HelpForm
         Item(rtb, "Seed Placement", "seed distribution: Random; RandomNearBorders / RandomFarBorders (weighted); CircularGrid (concentric rings); RectangularGrid and Staggered (odd rows shifted half a step)")
         Item(rtb, "Cell Count", "requested number of seeds (grid patterns approximate it)")
         Item(rtb, "Random Seed", "generator seed: the same number reproduces the same pattern")
+        Item(rtb, "Periodic X / Y", "wrap the pattern on the domain edges (cylinder / torus): cells are computed with ghost seeds so opposite edges continue seamlessly; rectangular domain only")
+        Item(rtb, "Full boundary cells", "draw boundary cells whole, without cutting them on the domain border: works on the rectangle and on sketch profiles (holes included); with Periodic X the overflow lands exactly on the opposite edge when the sketch is wrapped on a cylinder")
         Item(rtb, "Relax", "Lloyd relaxation iterations, evens out cell sizes (0 keeps patterns exact)")
         Item(rtb, "Cell Scale", "global symbol size relative to each cell")
         Gap(rtb)

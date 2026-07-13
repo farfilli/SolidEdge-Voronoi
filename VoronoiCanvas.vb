@@ -188,6 +188,7 @@ Public Class VoronoiCanvas
     ' Offset per-cella del simbolo/blocco (CTRL + rotella): cicla tra i simboli/blocchi.
     Public Property CellSymbolOffsets As List(Of Integer) = New List(Of Integer)
     Public Event SeedSymbolOffsetsEdited As EventHandler
+    Public Event SeedColorsEdited As EventHandler
 
     ' Posizione corrente del mouse in coordinate mondo (per la status bar).
     Public Property LastWorldCursorX As Double
@@ -1214,6 +1215,20 @@ Public Class VoronoiCanvas
         hoverSeedIndex = idx
 
         If idx < 0 Then
+            Invalidate()
+            Return
+        End If
+
+        If (ModifierKeys And Keys.Alt) = Keys.Alt Then
+            ' ALT + rotella: cicla il colore della cella (Auto + tavolozza).
+            ' Vale per qualsiasi stile, quindi sta prima della guardia simboli.
+            EnsureSeedCellColorCount(EditableSeeds.Count)
+            Dim stepC As Integer = If(e.Delta > 0, 1, -1)
+            Dim total As Integer = CellPaletteNames.Length + 1     ' Auto + 16
+            Dim v As Integer = CellColorIndices(idx) + 1 + stepC   ' -1..15 -> 0..16
+            v = ((v Mod total) + total) Mod total
+            CellColorIndices(idx) = v - 1
+            RaiseEvent SeedColorsEdited(Me, EventArgs.Empty)
             Invalidate()
             Return
         End If

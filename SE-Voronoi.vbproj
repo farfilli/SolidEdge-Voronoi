@@ -134,6 +134,7 @@
     <Compile Include="SvgExporter.vb" />
     <Compile Include="VoronoiCanvas.vb" />
     <Compile Include="VoronoiEngine.vb" />
+    <Compile Include="VoronoiPeriodic.vb" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="MainForm.resx">
@@ -160,6 +161,7 @@
       <LastGenOutput>Settings.Designer.vb</LastGenOutput>
     </None>
     <None Include="packages.config" />
+    <None Include="README.md" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="SE-Voronoi-Blocks.ico" />

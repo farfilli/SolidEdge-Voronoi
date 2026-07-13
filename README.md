@@ -74,7 +74,7 @@ Seed points can be edited directly on the canvas: drag to move, CTRL + click or 
 
 ![Cell selection](Images/cell-selection.png)
 
-Clicking a cell (or its seed) selects it: the cell is outlined and the SELECTED CELL sidebar section shows its properties. Scale, rotation, and symbol can be changed per cell from the panel or directly with the mouse wheel over the cell (wheel = scale, SHIFT + wheel = rotate, CTRL + wheel = cycle symbol).
+Clicking a cell (or its seed) selects it: the cell is outlined and the SELECTED CELL sidebar section shows its properties. Scale, rotation, and symbol can be changed per cell from the panel or directly with the mouse wheel over the cell (wheel = scale, SHIFT + wheel = rotate, CTRL + wheel = cycle symbol, ALT + wheel = cycle color).
 
 ### Pinned Seeds
 
@@ -117,6 +117,7 @@ A modeless, themed Help window documents every mouse gesture, toolbar command, a
 | Canvas | Wheel over cell | Per-cell scale |
 | Canvas | SHIFT + wheel over cell | Per-cell rotation |
 | Canvas | CTRL + wheel over cell | Cycle cell symbol |
+| Canvas | ALT + wheel over cell | Cycle cell color |
 | Canvas | CTRL + right-drag | Zoom (anchored at cursor) |
 | Canvas | CTRL + SHIFT + right-drag | Pan |
 | Canvas | ALT + right-click | Reset view |
