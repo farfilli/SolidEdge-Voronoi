@@ -315,9 +315,12 @@ Public Module ExportGeometry
                 .EffectiveStyle = effectiveStyle
             }
 
+            ' Colore per-cella: eventuale override di tavolozza del seme.
+            Dim colorOverride As Integer = canvas.GetSeedColorOverrideForCell(cell)
+
             For Each pth In paths
                 If pth IsNot Nothing AndAlso pth.Segments.Count > 0 Then
-                    ApplyDefaultStyle(pth, canvas, cellIndex)
+                    ApplyDefaultStyle(pth, canvas, cellIndex, colorOverride)
                     cg.StyledPaths.Add(pth)
                 End If
             Next
@@ -355,11 +358,13 @@ Public Module ExportGeometry
         Return CSng(Math.Max(0.05F, Math.Min(1.5F, value)))
     End Function
 
-    ' Offset di rotazione manuale per-cella (radianti), additivo sull'angolo base.
+    ' Offset di rotazione manuale per-cella, additivo sull'angolo base.
+    ' La lista CellRotations e' memorizzata in GRADI (coerente con la UI e col
+    ' file di progetto); la conversione in radianti avviene solo qui.
     Private Function GetEffectiveCellRotation(canvas As VoronoiCanvas, cellIndex As Integer) As Double
         If canvas Is Nothing Then Return 0.0
         If canvas.CellRotations IsNot Nothing AndAlso cellIndex >= 0 AndAlso cellIndex < canvas.CellRotations.Count Then
-            Return canvas.CellRotations(cellIndex)
+            Return canvas.CellRotations(cellIndex) * Math.PI / 180.0
         End If
         Return 0.0
     End Function
@@ -1029,8 +1034,12 @@ Public Module ExportGeometry
         Return New Vec2(p.X * R + cx, p.Y * R + cy)
     End Function
 
-    Private Sub ApplyDefaultStyle(path As ExportPath2D, canvas As VoronoiCanvas, cellIndex As Integer)
-        path.StrokeColor = GetExportColor(cellIndex)
+    Private Sub ApplyDefaultStyle(path As ExportPath2D, canvas As VoronoiCanvas, cellIndex As Integer, colorOverride As Integer)
+        If colorOverride >= 0 Then
+            path.StrokeColor = VoronoiCanvas.CellPaletteColor(colorOverride)
+        Else
+            path.StrokeColor = GetExportColor(cellIndex)
+        End If
         path.StrokeWidth = canvas.InnerCurveWidth
         path.FillColor = Color.Transparent
     End Sub

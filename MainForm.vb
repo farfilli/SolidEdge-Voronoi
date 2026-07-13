@@ -78,6 +78,7 @@ Public Class MainForm
     Private ReadOnly selRotation As New ThemedSlider()
     Private ReadOnly selSymbolOffset As New ThemedNumericUpDown()
     Private ReadOnly chkSelPinned As New ThemedCheckBox()
+    Private ReadOnly selColor As New ThemedComboBox()
     Private updatingSelectionUi As Boolean = False
 
     ' Stati apri/chiudi delle sezioni letti dai settings (applicati in NewSection).
@@ -105,6 +106,7 @@ Public Class MainForm
     Private currentSeedCellRotations As New List(Of Single)
     Private currentSeedCellSymbolOffsets As New List(Of Integer)
     Private currentSeedPinned As New List(Of Boolean)
+    Private currentSeedCellColors As New List(Of Integer)   ' indice tavolozza, -1 = auto
     Private lastCellScale As Single = 0.82F
 
     Private currentSketchBoundaries As New List(Of List(Of Vec2))
@@ -124,7 +126,7 @@ Public Class MainForm
         StartPosition = FormStartPosition.CenterScreen
         Width = 1550
         Height = 920
-        MinimumSize = New Size(1380, 760)
+        MinimumSize = New Size(1480, 760)
 
         Icon = My.Resources.SE_Voronoi
         Font = New Font("Segoe UI", 9.0F)
@@ -180,6 +182,7 @@ Public Class MainForm
         AddHandler selRotation.ValueChanged, AddressOf SelRotation_Changed
         AddHandler selSymbolOffset.ValueChanged, AddressOf SelSymbolOffset_Changed
         AddHandler chkSelPinned.CheckedChanged, AddressOf SelPinned_Changed
+        AddHandler selColor.SelectedIndexChanged, AddressOf SelColor_Changed
         AddHandler btnToSolidEdge.Click, AddressOf ExportToSolidEdge_Click
 
         AddHandler chkFill.CheckedChanged, AddressOf RefreshCanvasOptions
@@ -285,9 +288,6 @@ Public Class MainForm
         AddRowControl(chkSeeds, 22)
         AddRowControl(chkInner, 22)
 
-        ' ===== EXPORT =====
-        curSection = NewSection("EXPORT", True)
-        AddRowControl(chkExportAsBlocks, 22)
 
         ' ===== SELECTED CELL =====
         curSection = NewSection("SELECTED CELL", True)
@@ -296,6 +296,8 @@ Public Class MainForm
              "Rotation", selRotation)
         AddDoubleRow("Symbol Offset", selSymbolOffset,
              "", chkSelPinned)
+        AddDoubleRow("Color", selColor,
+             "", Nothing)
 
 
         chkDarkTheme.Text = "Dark theme"
@@ -350,6 +352,15 @@ Public Class MainForm
         x = AddTopBarGroup(x, "EXPORT",
                            {btnExportSvg, btnExportDxf, btnExportPng, btnToSolidEdge},
                            {50, 50, 50, 106})
+
+        ' Modalita' "a blocchi": parametro contestuale a To Solid Edge,
+        ' quindi vive accanto al pulsante invece che nella sidebar.
+        chkExportAsBlocks.Text = "As blocks"
+        chkExportAsBlocks.Width = 84
+        chkExportAsBlocks.Height = 22
+        chkExportAsBlocks.Location = New Point(x, 30)
+        topBar.Controls.Add(chkExportAsBlocks)
+        x += chkExportAsBlocks.Width + 8
 
         ' Lato destro (riposizionato dal Resize): toggle tema + Help.
         chkDarkTheme.Width = 100
@@ -711,7 +722,7 @@ Public Class MainForm
 
     Private Sub UpdateFormTitle()
         Dim name As String = If(String.IsNullOrEmpty(projectPath), "Untitled",
-                                Path.GetFileNameWithoutExtension(projectPath))
+                                IO.Path.GetFileNameWithoutExtension(projectPath))
         Text = "SE-Voronoi - " & name & If(projectDirty, " *", "")
     End Sub
 
@@ -850,6 +861,7 @@ Public Class MainForm
         EnsureSeedCellRotationCount(currentSeeds.Count)
         EnsureSeedCellSymbolOffsetCount(currentSeeds.Count)
         EnsureSeedPinnedCount(currentSeeds.Count)
+        EnsureSeedCellColorCount(currentSeeds.Count)
 
         Dim lines As New List(Of String)
         lines.Add("#SEVPROJ 1")
@@ -864,7 +876,8 @@ Public Class MainForm
                       currentSeedCellScales(i).ToString("R", Globalization.CultureInfo.InvariantCulture) & ";" &
                       currentSeedCellRotations(i).ToString("R", Globalization.CultureInfo.InvariantCulture) & ";" &
                       currentSeedCellSymbolOffsets(i).ToString(Globalization.CultureInfo.InvariantCulture) & ";" &
-                      currentSeedPinned(i).ToString())
+                      currentSeedPinned(i).ToString() & ";" &
+                      If(i < currentSeedCellColors.Count, currentSeedCellColors(i), -1).ToString(Globalization.CultureInfo.InvariantCulture))
         Next
 
         lines.Add("[SKETCH]")
@@ -1023,6 +1036,7 @@ Public Class MainForm
             currentSeedCellRotations = New List(Of Single)()
             currentSeedCellSymbolOffsets = New List(Of Integer)()
             currentSeedPinned = New List(Of Boolean)()
+            currentSeedCellColors = New List(Of Integer)()
 
             For Each ln In seedLines
                 Dim p = ln.Split(";"c)
@@ -1041,12 +1055,18 @@ Public Class MainForm
                    Integer.TryParse(p(5), Globalization.NumberStyles.Integer, Globalization.CultureInfo.InvariantCulture, off) AndAlso
                    Boolean.TryParse(p(6), pin) Then
 
+                    Dim colIdx As Integer = -1
+                    If p.Length >= 8 Then
+                        Integer.TryParse(p(7), Globalization.NumberStyles.Integer, Globalization.CultureInfo.InvariantCulture, colIdx)
+                    End If
+
                     currentSeeds.Add(New Vec2(x, y))
                     currentSeedStyleKeys.Add(key)
                     currentSeedCellScales.Add(sc)
                     currentSeedCellRotations.Add(rot)
                     currentSeedCellSymbolOffsets.Add(off)
                     currentSeedPinned.Add(pin)
+                    currentSeedCellColors.Add(colIdx)
                 End If
             Next
 
@@ -1263,12 +1283,15 @@ Public Class MainForm
         .TextAlign = ContentAlignment.BottomLeft
     }
 
-        ctrl.Dock = DockStyle.Top
-        ctrl.Height = forcedHeight
-        ctrl.Margin = New Padding(0)
-
         panel.Controls.Add(lbl, 0, 0)
-        panel.Controls.Add(ctrl, 0, 1)
+
+        ' ctrl puo' essere Nothing: cella con sola etichetta (o vuota).
+        If ctrl IsNot Nothing Then
+            ctrl.Dock = DockStyle.Top
+            ctrl.Height = forcedHeight
+            ctrl.Margin = New Padding(0)
+            panel.Controls.Add(ctrl, 0, 1)
+        End If
 
         Return panel
     End Function
@@ -1340,6 +1363,13 @@ Public Class MainForm
 
         chkSelPinned.Text = "Pin seed"
         chkSelPinned.Enabled = False
+
+        selColor.Items.Add("Auto")
+        For Each nm In VoronoiCanvas.CellPaletteNames
+            selColor.Items.Add(nm)
+        Next
+        selColor.SelectedIndex = 0
+        selColor.Enabled = False
 
         chkDarkTheme.Checked = True
         numVertexTrim.DecimalPlaces = 2
@@ -1500,6 +1530,7 @@ Public Class MainForm
         Dim pinScales As New List(Of Single)
         Dim pinRotations As New List(Of Single)
         Dim pinOffsets As New List(Of Integer)
+        Dim pinColors As New List(Of Integer)
 
         For i As Integer = 0 To currentSeeds.Count - 1
             If i < currentSeedPinned.Count AndAlso currentSeedPinned(i) Then
@@ -1508,6 +1539,7 @@ Public Class MainForm
                 pinScales.Add(If(i < currentSeedCellScales.Count, currentSeedCellScales(i), CSng(numCellScale.Value)))
                 pinRotations.Add(If(i < currentSeedCellRotations.Count, currentSeedCellRotations(i), 0.0F))
                 pinOffsets.Add(If(i < currentSeedCellSymbolOffsets.Count, currentSeedCellSymbolOffsets(i), 0))
+                pinColors.Add(If(i < currentSeedCellColors.Count, currentSeedCellColors(i), -1))
             End If
         Next
 
@@ -1522,6 +1554,7 @@ Public Class MainForm
         RebuildSeedCellRotations(currentSeeds.Count)
         RebuildSeedCellSymbolOffsets(currentSeeds.Count)
         RebuildSeedPinned(currentSeeds.Count)
+        RebuildSeedCellColors(currentSeeds.Count)
         lastCellScale = CSng(numCellScale.Value)
 
         ' La testa delle liste appartiene ai semi pinnati: ripristino proprieta'.
@@ -1531,6 +1564,7 @@ Public Class MainForm
             currentSeedCellRotations(k) = pinRotations(k)
             currentSeedCellSymbolOffsets(k) = pinOffsets(k)
             currentSeedPinned(k) = True
+            currentSeedCellColors(k) = pinColors(k)
         Next
 
         For i As Integer = 1 To CInt(numRelax.Value)
@@ -1635,6 +1669,7 @@ Public Class MainForm
         Dim allRotations As New List(Of Single)
         Dim allOffsets As New List(Of Integer)
         Dim allPinned As New List(Of Boolean)
+        Dim allColors As New List(Of Integer)
 
         If currentSketchDomains Is Nothing OrElse currentSketchDomains.Count = 0 Then Return
 
@@ -1647,6 +1682,7 @@ Public Class MainForm
         Dim pinScalesR As New List(Of List(Of Single))
         Dim pinRotR As New List(Of List(Of Single))
         Dim pinOffR As New List(Of List(Of Integer))
+        Dim pinColR As New List(Of List(Of Integer))
 
         For ri As Integer = 0 To currentSketchDomains.Count - 1
             pinPosR.Add(New List(Of Vec2))
@@ -1654,6 +1690,7 @@ Public Class MainForm
             pinScalesR.Add(New List(Of Single))
             pinRotR.Add(New List(Of Single))
             pinOffR.Add(New List(Of Integer))
+            pinColR.Add(New List(Of Integer))
         Next
 
         For si As Integer = 0 To currentSeeds.Count - 1
@@ -1667,6 +1704,7 @@ Public Class MainForm
                     pinScalesR(ri).Add(If(si < currentSeedCellScales.Count, currentSeedCellScales(si), CSng(numCellScale.Value)))
                     pinRotR(ri).Add(If(si < currentSeedCellRotations.Count, currentSeedCellRotations(si), 0.0F))
                     pinOffR(ri).Add(If(si < currentSeedCellSymbolOffsets.Count, currentSeedCellSymbolOffsets(si), 0))
+                    pinColR(ri).Add(If(si < currentSeedCellColors.Count, currentSeedCellColors(si), -1))
                     Exit For
                 End If
             Next
@@ -1709,6 +1747,7 @@ Public Class MainForm
             Dim regionScales As New List(Of Single)(pinScalesR(i))
             Dim regionRotations As New List(Of Single)(pinRotR(i))
             Dim regionOffsets As New List(Of Integer)(pinOffR(i))
+            Dim regionColors As New List(Of Integer)(pinColR(i))
             Dim regionPinned As New List(Of Boolean)
             Dim rng As New Random(regionSeed Xor &H51F15E)
 
@@ -1721,6 +1760,7 @@ Public Class MainForm
                 regionScales.Add(defaultScale)
                 regionRotations.Add(0.0F)
                 regionOffsets.Add(0)
+                regionColors.Add(-1)
                 regionPinned.Add(False)
             Next
 
@@ -1739,6 +1779,7 @@ Public Class MainForm
                 Dim filteredScales As New List(Of Single)
                 Dim filteredRotations As New List(Of Single)
                 Dim filteredOffsets As New List(Of Integer)
+                Dim filteredColors As New List(Of Integer)
                 Dim filteredPinned As New List(Of Boolean)
 
                 For k As Integer = 0 To seeds.Count - 1
@@ -1761,6 +1802,12 @@ Public Class MainForm
                             filteredOffsets.Add(regionOffsets(k))
                         End If
 
+                        If k < regionColors.Count Then
+                            filteredColors.Add(regionColors(k))
+                        Else
+                            filteredColors.Add(-1)
+                        End If
+
                         filteredPinned.Add(k < regionPinned.Count AndAlso regionPinned(k))
                     End If
                 Next
@@ -1770,6 +1817,7 @@ Public Class MainForm
                 regionScales = filteredScales
                 regionRotations = filteredRotations
                 regionOffsets = filteredOffsets
+                regionColors = filteredColors
                 regionPinned = filteredPinned
             Next
 
@@ -1782,6 +1830,7 @@ Public Class MainForm
             allRotations.AddRange(regionRotations)
             allOffsets.AddRange(regionOffsets)
             allPinned.AddRange(regionPinned)
+            allColors.AddRange(regionColors)
         Next
 
         currentSeeds = allSeeds
@@ -1790,6 +1839,7 @@ Public Class MainForm
         currentSeedCellRotations = allRotations
         currentSeedCellSymbolOffsets = allOffsets
         currentSeedPinned = allPinned
+        currentSeedCellColors = allColors
 
         canvas.Cells = allCells
         canvas.EditableSeeds = New List(Of Vec2)(allSeeds)
@@ -1798,6 +1848,7 @@ Public Class MainForm
         canvas.CellRotations = New List(Of Single)(currentSeedCellRotations)
         canvas.CellSymbolOffsets = New List(Of Integer)(currentSeedCellSymbolOffsets)
         canvas.SeedPinned = New List(Of Boolean)(currentSeedPinned)
+        canvas.CellColorIndices = New List(Of Integer)(currentSeedCellColors)
 
         ApplyOptions()
         canvas.Invalidate()
@@ -1816,12 +1867,14 @@ Public Class MainForm
         currentSeedCellRotations = New List(Of Single)(canvas.CellRotations)
         currentSeedCellSymbolOffsets = New List(Of Integer)(canvas.CellSymbolOffsets)
         currentSeedPinned = New List(Of Boolean)(canvas.SeedPinned)
+        currentSeedCellColors = New List(Of Integer)(canvas.CellColorIndices)
 
         EnsureSeedStyleKeyCount(currentSeeds.Count, CInt(numSeed.Value))
         EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
         EnsureSeedCellRotationCount(currentSeeds.Count)
         EnsureSeedCellSymbolOffsetCount(currentSeeds.Count)
         EnsureSeedPinnedCount(currentSeeds.Count)
+        EnsureSeedCellColorCount(currentSeeds.Count)
 
         BuildFromCurrentSeeds()
         LoadSelectionPanel()
@@ -1877,12 +1930,14 @@ Public Class MainForm
             selRotation.Enabled = has
             selSymbolOffset.Enabled = has
             chkSelPinned.Enabled = has
+            selColor.Enabled = has
 
             If has Then
                 EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
                 EnsureSeedCellRotationCount(currentSeeds.Count)
                 EnsureSeedCellSymbolOffsetCount(currentSeeds.Count)
                 EnsureSeedPinnedCount(currentSeeds.Count)
+                EnsureSeedCellColorCount(currentSeeds.Count)
 
                 lblSelInfo.Text = "Seed #" & (idx + 1).ToString() &
                                   "   X: " & currentSeeds(idx).X.ToString("0.0") &
@@ -1892,6 +1947,7 @@ Public Class MainForm
                 selRotation.Value = CDec(NormalizeDeg(currentSeedCellRotations(idx)))
                 selSymbolOffset.Value = CDec(currentSeedCellSymbolOffsets(idx))
                 chkSelPinned.Checked = currentSeedPinned(idx)
+                selColor.SelectedIndex = currentSeedCellColors(idx) + 1   ' -1 (auto) -> 0
             Else
                 lblSelInfo.Text = "No cell selected - click a cell"
             End If
@@ -1906,6 +1962,17 @@ Public Class MainForm
         If idx < 0 OrElse idx >= currentSeeds.Count Then Return -1
         Return idx
     End Function
+
+    Private Sub SelColor_Changed(sender As Object, e As EventArgs)
+        Dim idx As Integer = SelectedIndexForEdit()
+        If idx < 0 Then Return
+        MarkProjectDirty()
+
+        EnsureSeedCellColorCount(currentSeeds.Count)
+        currentSeedCellColors(idx) = selColor.SelectedIndex - 1   ' 0 (Auto) -> -1
+        canvas.CellColorIndices = New List(Of Integer)(currentSeedCellColors)
+        canvas.Invalidate()
+    End Sub
 
     Private Sub SelScale_Changed(sender As Object, e As EventArgs)
         Dim idx As Integer = SelectedIndexForEdit()
@@ -1992,6 +2059,7 @@ Public Class MainForm
         EnsureSeedCellScaleCount(currentSeeds.Count, CSng(numCellScale.Value))
         EnsureSeedCellRotationCount(currentSeeds.Count)
         EnsureSeedCellSymbolOffsetCount(currentSeeds.Count)
+        EnsureSeedCellColorCount(currentSeeds.Count)
 
         If useSketchDomains AndAlso lockSketchViewDomain Then
             canvas.Domain = currentWorldDomain
@@ -2007,6 +2075,7 @@ Public Class MainForm
             Dim allRotations As New List(Of Single)
             Dim allOffsets As New List(Of Integer)
             Dim allPinned As New List(Of Boolean)
+            Dim allColors As New List(Of Integer)
 
             ' Il riordino per dominio rimescola gli indici: memorizzo la
             ' posizione del seme selezionato per rimapparla dopo.
@@ -2021,6 +2090,7 @@ Public Class MainForm
                 Dim rotationsInDomain As New List(Of Single)
                 Dim offsetsInDomain As New List(Of Integer)
                 Dim pinnedInDomain As New List(Of Boolean)
+                Dim colorsInDomain As New List(Of Integer)
 
                 For i As Integer = 0 To currentSeeds.Count - 1
                     If Geo2D.PointInPolygonWithHoles(currentSeeds(i), d.Outer, d.Holes) Then
@@ -2049,6 +2119,12 @@ Public Class MainForm
                         End If
 
                         pinnedInDomain.Add(i < currentSeedPinned.Count AndAlso currentSeedPinned(i))
+
+                        If i < currentSeedCellColors.Count Then
+                            colorsInDomain.Add(currentSeedCellColors(i))
+                        Else
+                            colorsInDomain.Add(-1)
+                        End If
                     End If
                 Next
 
@@ -2062,6 +2138,7 @@ Public Class MainForm
                 allRotations.AddRange(rotationsInDomain)
                 allOffsets.AddRange(offsetsInDomain)
                 allPinned.AddRange(pinnedInDomain)
+                allColors.AddRange(colorsInDomain)
                 allCells.AddRange(cells)
             Next
 
@@ -2071,6 +2148,7 @@ Public Class MainForm
             currentSeedCellRotations = allRotations
             currentSeedCellSymbolOffsets = allOffsets
             currentSeedPinned = allPinned
+            currentSeedCellColors = allColors
 
             canvas.Cells = allCells
             canvas.EditableSeeds = New List(Of Vec2)(allSeeds)
@@ -2097,12 +2175,14 @@ Public Class MainForm
         EnsureSeedCellRotationCount(currentSeeds.Count)
         EnsureSeedCellSymbolOffsetCount(currentSeeds.Count)
         EnsureSeedPinnedCount(currentSeeds.Count)
+        EnsureSeedCellColorCount(currentSeeds.Count)
 
         canvas.SeedStyleKeys = New List(Of Integer)(currentSeedStyleKeys)
         canvas.CellScales = New List(Of Single)(currentSeedCellScales)
         canvas.CellRotations = New List(Of Single)(currentSeedCellRotations)
         canvas.CellSymbolOffsets = New List(Of Integer)(currentSeedCellSymbolOffsets)
         canvas.SeedPinned = New List(Of Boolean)(currentSeedPinned)
+        canvas.CellColorIndices = New List(Of Integer)(currentSeedCellColors)
 
         ApplyOptions()
         canvas.Invalidate()
@@ -2250,6 +2330,8 @@ Public Class MainForm
             canvas.CellSymbolOffsets = New List(Of Integer)()
             currentSeedPinned = New List(Of Boolean)()
             canvas.SeedPinned = New List(Of Boolean)()
+            currentSeedCellColors = New List(Of Integer)()
+            canvas.CellColorIndices = New List(Of Integer)()
             canvas.SelectedSeedIndex = -1
 
             Dim holeFlags As New List(Of Boolean)
@@ -2770,6 +2852,27 @@ Public Class MainForm
         End While
     End Sub
 
+    Private Sub RebuildSeedCellColors(count As Integer)
+        currentSeedCellColors = New List(Of Integer)(count)
+        For i As Integer = 1 To count
+            currentSeedCellColors.Add(-1)
+        Next
+    End Sub
+
+    Private Sub EnsureSeedCellColorCount(count As Integer)
+        If currentSeedCellColors Is Nothing Then
+            currentSeedCellColors = New List(Of Integer)()
+        End If
+
+        While currentSeedCellColors.Count < count
+            currentSeedCellColors.Add(-1)
+        End While
+
+        While currentSeedCellColors.Count > count
+            currentSeedCellColors.RemoveAt(currentSeedCellColors.Count - 1)
+        End While
+    End Sub
+
     Private Sub RebuildSeedPinned(count As Integer)
         currentSeedPinned = New List(Of Boolean)(count)
         For i As Integer = 1 To count
@@ -2933,18 +3036,6 @@ Public Class BlockLibraryForm
         Viewport_Resize(viewport, EventArgs.Empty)
         wheelFilter = New WheelToScrollFilter(viewport, libScroll)
         Application.AddMessageFilter(wheelFilter)
-    End Sub
-
-    Protected Overrides Sub OnFormClosed(e As FormClosedEventArgs)
-        If wheelFilter IsNot Nothing Then
-            Application.RemoveMessageFilter(wheelFilter)
-        End If
-
-        For Each c As Control In flow.Controls
-            DisposeTile(c)
-        Next
-        MyBase.OnFormClosed(e)
-
     End Sub
 
     Public Sub SetBlocks(list As List(Of BlockDefinition))
@@ -3126,7 +3217,16 @@ Public Class BlockLibraryForm
         Return bmp
     End Function
 
+    Protected Overrides Sub OnFormClosed(e As FormClosedEventArgs)
+        If wheelFilter IsNot Nothing Then
+            Application.RemoveMessageFilter(wheelFilter)
+        End If
 
+        For Each c As Control In flow.Controls
+            DisposeTile(c)
+        Next
+        MyBase.OnFormClosed(e)
+    End Sub
 End Class
 
 
@@ -4555,6 +4655,7 @@ Public Class HelpForm
         Item(rtb, "SVG / DXF", "vector output of the current geometry")
         Item(rtb, "PNG", "2000 px image of the whole domain (ignores zoom/pan)")
         Item(rtb, "To Solid Edge", "draws into the active sketch (missing block definitions are created)")
+        Item(rtb, "As blocks", "checkbox next to To Solid Edge: emits block occurrences instead of raw geometry")
         Item(rtb, "Dark theme / Help", "right side of the toolbar: palette toggle and this window")
         Gap(rtb)
 
@@ -4580,15 +4681,12 @@ Public Class HelpForm
         Heading(rtb, "SELECTED CELL")
         Item(rtb, "Info line", "index and world coordinates of the selected seed")
         Item(rtb, "Scale / Rotation / Symbol Offset", "exact per-cell values, same data edited by the mouse wheel")
+        Item(rtb, "Color", "palette color for the selected cell (Auto = automatic by cell index); applies to fill and strokes")
         Item(rtb, "Pin seed", "locks the seed position: it cannot be dragged and Generate/Relax keep it in place (white ring marker)")
         Gap(rtb)
 
         Heading(rtb, "DISPLAY")
         Item(rtb, "Show outer edges / seeds / inner curve", "visibility toggles; they also affect PNG export")
-        Gap(rtb)
-
-        Heading(rtb, "EXPORT (SIDEBAR)")
-        Item(rtb, "To SE as blocks", "emits block occurrences instead of raw geometry when sending to Solid Edge")
         Gap(rtb)
 
         Heading(rtb, "STATUS BAR")

@@ -116,6 +116,67 @@ Public Class VoronoiCanvas
     Public Event SeedRotationsEdited As EventHandler
 
     Public Property CellScales As List(Of Single) = New List(Of Single)
+
+    ' Colore per-seme: indice nella tavolozza (-1 = automatico per indice cella).
+    Public Property CellColorIndices As List(Of Integer) = New List(Of Integer)
+
+    ' Tavolozza nominata: stessi 16 colori storici di GetCellColor/GetExportColor.
+    Public Shared ReadOnly CellPaletteNames As String() = {
+        "Cyan", "Teal", "Light Cyan", "Turquoise", "Aqua", "Mint",
+        "Petrol", "Sky Blue", "Purple", "Violet", "Indigo", "Deep Blue",
+        "Lagoon", "Green", "Light Green", "Amber"
+    }
+
+    Public Shared Function CellPaletteColor(paletteIndex As Integer) As Color
+        Dim palette As Color() = {
+            Color.FromArgb(0, 188, 212),
+            Color.FromArgb(0, 150, 170),
+            Color.FromArgb(110, 231, 243),
+            Color.FromArgb(64, 224, 208),
+            Color.FromArgb(26, 205, 192),
+            Color.FromArgb(167, 255, 235),
+            Color.FromArgb(0, 121, 140),
+            Color.FromArgb(79, 195, 247),
+            Color.FromArgb(111, 0, 168),
+            Color.FromArgb(142, 36, 170),
+            Color.FromArgb(49, 27, 146),
+            Color.FromArgb(0, 70, 112),
+            Color.FromArgb(38, 198, 218),
+            Color.FromArgb(0, 200, 83),
+            Color.FromArgb(198, 255, 140),
+            Color.FromArgb(255, 202, 40)
+        }
+        Return palette(((paletteIndex Mod palette.Length) + palette.Length) Mod palette.Length)
+    End Function
+
+    ' Override colore del seme che possiede la cella (-1 = nessuno).
+    ' Usato anche da ExportGeometry per stroke/fill coerenti con l'anteprima.
+    Public Function GetSeedColorOverrideForCell(cell As VoronoiCell) As Integer
+        If cell Is Nothing OrElse EditableSeeds Is Nothing OrElse CellColorIndices Is Nothing Then Return -1
+
+        For i As Integer = 0 To EditableSeeds.Count - 1
+            If Geo2D.Distance(EditableSeeds(i), cell.Seed) <= 0.001 Then
+                If i < CellColorIndices.Count Then Return CellColorIndices(i)
+                Return -1
+            End If
+        Next
+
+        Return -1
+    End Function
+
+    Public Sub EnsureSeedCellColorCount(requiredCount As Integer)
+        If CellColorIndices Is Nothing Then
+            CellColorIndices = New List(Of Integer)()
+        End If
+
+        While CellColorIndices.Count < requiredCount
+            CellColorIndices.Add(-1)
+        End While
+
+        While CellColorIndices.Count > requiredCount
+            CellColorIndices.RemoveAt(CellColorIndices.Count - 1)
+        End While
+    End Sub
     Public Property MinCellScale As Single = 0.05F
     Public Property MaxCellScale As Single = 1.5F
     Public Property MouseWheelScaleStep As Single = 0.02F
@@ -301,7 +362,15 @@ Public Class VoronoiCanvas
                 Next
 
                 If FillCells Then
-                    Using br As New SolidBrush(GetCellColor(i, 42))
+                    Dim ovr As Integer = GetSeedColorOverrideForCell(cell)
+                    Dim fillC As Color
+                    If ovr >= 0 Then
+                        Dim pc = CellPaletteColor(ovr)
+                        fillC = Color.FromArgb(42, pc.R, pc.G, pc.B)
+                    Else
+                        fillC = GetCellColor(i, 42)
+                    End If
+                    Using br As New SolidBrush(fillC)
                         g.FillPolygon(br, outerPts)
                     End Using
                 End If
@@ -358,7 +427,10 @@ Public Class VoronoiCanvas
                                 Next
                                 If okPts Then composite.AddPolygon(scr)
                             Next
-                            Dim fc = ExportGeometry.GetExportCellColor(cg.CellIndex)
+                            Dim fcOvr As Integer = GetSeedColorOverrideForCell(cg.Cell)
+                            Dim fc As Color = If(fcOvr >= 0,
+                                                 CellPaletteColor(fcOvr),
+                                                 ExportGeometry.GetExportCellColor(cg.CellIndex))
                             Using br As New SolidBrush(Color.FromArgb(235, fc.R, fc.G, fc.B))
                                 g.FillPath(br, composite)
                             End Using
@@ -969,6 +1041,7 @@ Public Class VoronoiCanvas
                 EditableSeeds.Add(ClampToDomain(ScreenToWorld(e.Location)))
                 EnsureCellScaleCount(EditableSeeds.Count)
                 EnsureSeedPinnedCount(EditableSeeds.Count)
+                EnsureSeedCellColorCount(EditableSeeds.Count)
                 CellScales(EditableSeeds.Count - 1) = ClampCellScale(CellScale)
                 SelectedSeedIndex = EditableSeeds.Count - 1
                 RaiseEvent SeedsEdited(Me, EventArgs.Empty)
@@ -1001,6 +1074,10 @@ Public Class VoronoiCanvas
 
                 If SeedPinned IsNot Nothing AndAlso idx < SeedPinned.Count Then
                     SeedPinned.RemoveAt(idx)
+                End If
+
+                If CellColorIndices IsNot Nothing AndAlso idx < CellColorIndices.Count Then
+                    CellColorIndices.RemoveAt(idx)
                 End If
 
                 If _selectedSeed = idx Then
@@ -1163,9 +1240,10 @@ Public Class VoronoiCanvas
 
         If (ModifierKeys And Keys.Shift) = Keys.Shift Then
             ' SHIFT + rotella: ruota il simbolo della cella (offset additivo).
+            ' La lista CellRotations e' in GRADI (convertiti in radianti solo
+            ' al consumo, in ExportGeometry.GetEffectiveCellRotation).
             EnsureCellRotationCount(EditableSeeds.Count)
-            Dim stepRad As Single = CSng(MouseWheelRotateStepDeg * Math.PI / 180.0)
-            CellRotations(idx) = CellRotations(idx) + stepRad * wheelSteps
+            CellRotations(idx) = CellRotations(idx) + CSng(MouseWheelRotateStepDeg) * wheelSteps
             RaiseEvent SeedRotationsEdited(Me, EventArgs.Empty)
             Invalidate()
             Return
