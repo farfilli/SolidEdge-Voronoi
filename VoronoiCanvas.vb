@@ -74,6 +74,10 @@ Public Class VoronoiCanvas
     ' (OutsideProfileColor), indipendentemente da questa opzione.
     Public Property ShowDomainFill As Boolean = True
 
+    ' Rettangolo tratteggiato del dominio: utile solo con la periodicita'
+    ' attiva (e' il periodo); altrimenti il profilo editabile basta.
+    Public Property ShowDomainRect As Boolean = False
+
     Public Property FillCells As Boolean = True
     Public Property FillSymbols As Boolean = False
     Public Property ShowOuterEdges As Boolean = True
@@ -104,6 +108,15 @@ Public Class VoronoiCanvas
     Public Property InnerOffset As Single = 0.0F
     Public Property InnerCurveWidth As Single = 1.8F
 
+
+    Public Event SketchBoundariesEdited As EventHandler
+    Public Property AllowSketchEditing As Boolean = True
+
+    Private dragBoundLoop As Integer = -1
+    Private dragBoundPt As Integer = -1
+    Private hoverBoundLoop As Integer = -1
+    Private hoverBoundPt As Integer = -1
+    Private isBoundDragging As Boolean = False
 
     Private dragSeedIndex As Integer = -1
     Private hoverSeedIndex As Integer = -1
@@ -367,15 +380,27 @@ Public Class VoronoiCanvas
                 End If
             End Using
 
-            For Each sp In pts
+            For k As Integer = 0 To pts.Count - 1
+                Dim sp = pts(k)
+                Dim isActive As Boolean =
+                    (isBoundDragging AndAlso i = dragBoundLoop AndAlso k = dragBoundPt) OrElse
+                    (Not isBoundDragging AndAlso i = hoverBoundLoop AndAlso k = hoverBoundPt)
+
+                Dim r As Single = If(isActive, 4.6F, 2.4F)
                 Using b As New SolidBrush(strokeColor)
-                    g.FillEllipse(b, sp.X - 2.4F, sp.Y - 2.4F, 4.8F, 4.8F)
+                    g.FillEllipse(b, sp.X - r, sp.Y - r, r * 2.0F, r * 2.0F)
                 End Using
+                If isActive Then
+                    Using pw As New Pen(Color.White, 1.4F)
+                        g.DrawEllipse(pw, sp.X - r, sp.Y - r, r * 2.0F, r * 2.0F)
+                    End Using
+                End If
             Next
         Next
     End Sub
 
     Private Sub DrawBounds(g As Graphics, view As ViewInfo)
+        If Not ShowDomainRect Then Return
         Dim p1 = WorldToScreen(New Vec2(Domain.Left, Domain.Top), view)
         Dim p2 = WorldToScreen(New Vec2(Domain.Right, Domain.Bottom), view)
 
@@ -1041,6 +1066,83 @@ Public Class VoronoiCanvas
     'End Sub
 
 
+    ' --- Editing del profilo sketch: hit test su punti e lati ---
+
+    Private Function HitTestBoundaryPoint(screenPt As Point, ByRef loopIdx As Integer, ByRef ptIdx As Integer) As Boolean
+        loopIdx = -1
+        ptIdx = -1
+        If Not ShowSketchBoundary OrElse SketchBoundaries Is Nothing Then Return False
+
+        Dim view = GetView()
+        Dim best As Double = 81.0   ' raggio di presa 9 px
+
+        For li As Integer = 0 To SketchBoundaries.Count - 1
+            Dim lp = SketchBoundaries(li)
+            If lp Is Nothing Then Continue For
+
+            For pi As Integer = 0 To lp.Count - 1
+                Dim sp = WorldToScreen(lp(pi), view)
+                Dim dx = sp.X - screenPt.X
+                Dim dy = sp.Y - screenPt.Y
+                Dim d2 = CDbl(dx * dx + dy * dy)
+                If d2 <= best Then
+                    best = d2
+                    loopIdx = li
+                    ptIdx = pi
+                End If
+            Next
+        Next
+
+        Return loopIdx >= 0
+    End Function
+
+    Private Function HitTestBoundaryEdge(screenPt As Point,
+                                         ByRef loopIdx As Integer,
+                                         ByRef insertAt As Integer,
+                                         ByRef worldPt As Vec2) As Boolean
+        loopIdx = -1
+        insertAt = -1
+        worldPt = New Vec2(0, 0)
+        If Not ShowSketchBoundary OrElse SketchBoundaries Is Nothing Then Return False
+
+        Dim view = GetView()
+        Dim best As Double = 6.5   ' distanza massima dal lato, in px
+
+        For li As Integer = 0 To SketchBoundaries.Count - 1
+            Dim lp = SketchBoundaries(li)
+            If lp Is Nothing OrElse lp.Count < 3 Then Continue For
+
+            For i As Integer = 0 To lp.Count - 1
+                Dim a = WorldToScreen(lp(i), view)
+                Dim b = WorldToScreen(lp((i + 1) Mod lp.Count), view)
+
+                Dim vx = b.X - a.X
+                Dim vy = b.Y - a.Y
+                Dim l2 = CDbl(vx * vx + vy * vy)
+                If l2 < 0.0001 Then Continue For
+
+                Dim t As Double = ((screenPt.X - a.X) * vx + (screenPt.Y - a.Y) * vy) / l2
+                If t < 0.03 OrElse t > 0.97 Then Continue For
+
+                Dim px = a.X + vx * t
+                Dim py = a.Y + vy * t
+                Dim d = Math.Sqrt((screenPt.X - px) * (screenPt.X - px) + (screenPt.Y - py) * (screenPt.Y - py))
+
+                If d <= best Then
+                    best = d
+                    loopIdx = li
+                    insertAt = i + 1
+                    ' Punto esatto sul lato, interpolato in coordinate mondo.
+                    Dim wa = lp(i)
+                    Dim wb = lp((i + 1) Mod lp.Count)
+                    worldPt = New Vec2(wa.X + (wb.X - wa.X) * t, wa.Y + (wb.Y - wa.Y) * t)
+                End If
+            Next
+        Next
+
+        Return loopIdx >= 0
+    End Function
+
     Protected Overrides Sub OnMouseDown(e As MouseEventArgs)
         MyBase.OnMouseDown(e)
 
@@ -1069,6 +1171,22 @@ Public Class VoronoiCanvas
             Return
         End If
 
+        ' --- Editing profilo: ALT + click su un punto lo elimina (min 3) ---
+        If e.Button = MouseButtons.Left AndAlso AllowSketchEditing AndAlso
+           (ModifierKeys And Keys.Alt) = Keys.Alt Then
+            Dim bl As Integer, bp As Integer
+            If HitTestBoundaryPoint(e.Location, bl, bp) Then
+                If SketchBoundaries(bl).Count > 3 Then
+                    SketchBoundaries(bl).RemoveAt(bp)
+                    hoverBoundLoop = -1
+                    hoverBoundPt = -1
+                    RaiseEvent SketchBoundariesEdited(Me, EventArgs.Empty)
+                End If
+                Invalidate()
+                Return
+            End If
+        End If
+
         If Not AllowSeedEditing Then Return
 
         Dim idx = HitTestSeed(e.Location)
@@ -1088,6 +1206,19 @@ Public Class VoronoiCanvas
                 Capture = True
                 Invalidate()
                 Return
+            End If
+
+            ' --- Editing profilo: presa e trascinamento di un punto ---
+            If AllowSketchEditing AndAlso (ModifierKeys And Keys.Control) <> Keys.Control Then
+                Dim bl As Integer, bp As Integer
+                If HitTestBoundaryPoint(e.Location, bl, bp) Then
+                    dragBoundLoop = bl
+                    dragBoundPt = bp
+                    isBoundDragging = True
+                    Capture = True
+                    Invalidate()
+                    Return
+                End If
             End If
 
             If (ModifierKeys And Keys.Control) = Keys.Control Then
@@ -1204,16 +1335,38 @@ Public Class VoronoiCanvas
             Return
         End If
 
+        ' --- Trascinamento di un punto del profilo ---
+        If isBoundDragging AndAlso dragBoundLoop >= 0 AndAlso
+           SketchBoundaries IsNot Nothing AndAlso dragBoundLoop < SketchBoundaries.Count AndAlso
+           dragBoundPt >= 0 AndAlso dragBoundPt < SketchBoundaries(dragBoundLoop).Count Then
+            SketchBoundaries(dragBoundLoop)(dragBoundPt) = ScreenToWorld(e.Location)
+            RaiseEvent SketchBoundariesEdited(Me, EventArgs.Empty)
+            Invalidate()
+            Return
+        End If
+
         If Not AllowSeedEditing Then Return
 
         hoverSeedIndex = HitTestSeed(e.Location)
+
+        hoverBoundLoop = -1
+        hoverBoundPt = -1
+        If AllowSketchEditing AndAlso hoverSeedIndex < 0 Then
+            HitTestBoundaryPoint(e.Location, hoverBoundLoop, hoverBoundPt)
+        End If
 
         If isDragging AndAlso dragSeedIndex >= 0 AndAlso dragSeedIndex < EditableSeeds.Count Then
             EditableSeeds(dragSeedIndex) = ClampToDomain(ScreenToWorld(e.Location))
             RaiseEvent SeedsEdited(Me, EventArgs.Empty)
         End If
 
-        Cursor = If(hoverSeedIndex >= 0 OrElse isDragging, Cursors.SizeAll, Cursors.Default)
+        If hoverSeedIndex >= 0 OrElse isDragging Then
+            Cursor = Cursors.SizeAll
+        ElseIf hoverBoundPt >= 0 Then
+            Cursor = Cursors.Hand
+        Else
+            Cursor = Cursors.Default
+        End If
         Invalidate()
     End Sub
 
@@ -1224,6 +1377,15 @@ Public Class VoronoiCanvas
             viewGesture = 0
             Capture = False
             Cursor = Cursors.Default
+            Invalidate()
+            Return
+        End If
+
+        If isBoundDragging Then
+            isBoundDragging = False
+            dragBoundLoop = -1
+            dragBoundPt = -1
+            Capture = False
             Invalidate()
             Return
         End If
@@ -1247,8 +1409,24 @@ Public Class VoronoiCanvas
 
     Protected Overrides Sub OnMouseDoubleClick(e As MouseEventArgs)
         MyBase.OnMouseDoubleClick(e)
-        If Not AllowSeedEditing Then Return
         If e.Button <> MouseButtons.Left Then Return
+
+        ' --- Doppio click su un lato del profilo: inserisce un punto li'. ---
+        If AllowSketchEditing Then
+            Dim pl As Integer, pp As Integer
+            If HitTestBoundaryPoint(e.Location, pl, pp) Then Return   ' su un punto: niente
+
+            Dim bl As Integer, insAt As Integer
+            Dim wpt As Vec2
+            If HitTestBoundaryEdge(e.Location, bl, insAt, wpt) Then
+                SketchBoundaries(bl).Insert(insAt, wpt)
+                RaiseEvent SketchBoundariesEdited(Me, EventArgs.Empty)
+                Invalidate()
+                Return
+            End If
+        End If
+
+        If Not AllowSeedEditing Then Return
 
         EditableSeeds.Add(ClampToDomain(ScreenToWorld(e.Location)))
         EnsureCellScaleCount(EditableSeeds.Count)

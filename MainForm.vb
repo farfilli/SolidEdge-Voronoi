@@ -214,6 +214,7 @@ Public Class MainForm
         AddHandler canvas.SeedRotationsEdited, AddressOf Canvas_SeedRotationsEdited
         AddHandler canvas.SeedSymbolOffsetsEdited, AddressOf Canvas_SeedSymbolOffsetsEdited
         AddHandler canvas.SeedColorsEdited, AddressOf Canvas_SeedColorsEdited
+        AddHandler canvas.SketchBoundariesEdited, AddressOf Canvas_SketchBoundariesEdited
 
         AddHandler numCells.ValueChanged, AddressOf GenerationParameterChanged
         AddHandler numSeed.ValueChanged, AddressOf GenerationParameterChanged
@@ -225,6 +226,7 @@ Public Class MainForm
         AddHandler chkPeriodicY.CheckedChanged, AddressOf GenerationParameterChanged
         AddHandler chkFullSeamCells.CheckedChanged, AddressOf GenerationParameterChanged
 
+        InstallDefaultRectangularProfile()
         GenerateRandomDiagram(Nothing, EventArgs.Empty)
 
         loadingProject = False
@@ -810,14 +812,7 @@ Public Class MainForm
 
         loadingProject = True
         Try
-            useSketchDomains = False
-            lockSketchViewDomain = False
-            currentSketchBoundaries = New List(Of List(Of Vec2))()
-            currentSketchDomains = New List(Of SketchDomainRegion)()
-            canvas.SketchBoundaries = New List(Of List(Of Vec2))()
-            canvas.SketchBoundaryIsHole = New List(Of Boolean)()
-            canvas.SketchDomains = New List(Of CanvasSketchDomain)()
-            canvas.ConstrainSeedsToSketchDomains = False
+            InstallDefaultRectangularProfile()
 
             currentBlockSymbols = New List(Of BlockDefinition)()
             canvas.BlockSymbols = currentBlockSymbols
@@ -825,8 +820,6 @@ Public Class MainForm
                 blockLibForm.SetBlocks(currentBlockSymbols)
             End If
 
-            currentWorldDomain = domain
-            canvas.Domain = currentWorldDomain
             canvas.SelectedSeedIndex = -1
             canvas.ResetView()
 
@@ -1052,6 +1045,11 @@ Public Class MainForm
             lockSketchViewDomain = useSketchDomains
             currentWorldDomain = domRect
             canvas.Domain = currentWorldDomain
+
+            ' Progetti senza profilo (o pre-esistenti): rettangolo editabile.
+            If Not useSketchDomains Then
+                InstallDefaultRectangularProfile()
+            End If
 
             ' Semi con le loro proprieta' per-cella: layout esatto, nessuna rigenerazione.
             currentSeeds = New List(Of Vec2)()
@@ -1559,7 +1557,8 @@ Public Class MainForm
     'End Sub
 
     Private Sub GenerateRandomDiagram(sender As Object, e As EventArgs)
-        If useSketchDomains AndAlso currentSketchDomains IsNot Nothing AndAlso currentSketchDomains.Count > 0 Then
+        If useSketchDomains AndAlso Not (PeriodicXActive() OrElse PeriodicYActive()) AndAlso
+           currentSketchDomains IsNot Nothing AndAlso currentSketchDomains.Count > 0 Then
             GenerateDiagramFromSketchDomains()
             Return
         End If
@@ -1956,6 +1955,119 @@ Public Class MainForm
         LoadSelectionPanel()
     End Sub
 
+    ' Il profilo e' stato editato sul canvas: ricostruisce domini e diagramma.
+    ' Installa il profilo di partenza: un rettangolo editabile pari al dominio.
+    ' E' un profilo a tutti gli effetti (drag / doppio click / ALT+click) e
+    ' viene interamente rimpiazzato caricando un profilo da file o Solid Edge.
+    Private Sub InstallDefaultRectangularProfile()
+        Dim rectLoop As New List(Of Vec2) From {
+            New Vec2(domain.Left, domain.Top),
+            New Vec2(domain.Right, domain.Top),
+            New Vec2(domain.Right, domain.Bottom),
+            New Vec2(domain.Left, domain.Bottom)
+        }
+
+        currentSketchBoundaries = New List(Of List(Of Vec2))()
+        currentSketchBoundaries.Add(rectLoop)
+
+        Dim r As New SketchDomainRegion()
+        r.Outer = New List(Of Vec2)(rectLoop)
+        r.Bounds = Geo2D.GetBounds(r.Outer)
+        currentSketchDomains = New List(Of SketchDomainRegion) From {r}
+
+        canvas.SketchBoundaries = currentSketchBoundaries
+        canvas.SketchBoundaryIsHole = New List(Of Boolean) From {False}
+        canvas.SketchDomains = ConvertToCanvasDomains(currentSketchDomains)
+        canvas.ConstrainSeedsToSketchDomains = True
+        canvas.ShowSketchBoundary = True
+
+        useSketchDomains = True
+        lockSketchViewDomain = True
+
+        Dim pad As Single = 40.0F
+        currentWorldDomain = New RectangleF(domain.Left - pad, domain.Top - pad,
+                                            domain.Width + pad * 2.0F, domain.Height + pad * 2.0F)
+        canvas.Domain = currentWorldDomain
+    End Sub
+
+    Private Sub Canvas_SketchBoundariesEdited(sender As Object, e As EventArgs)
+        MarkProjectDirty()
+
+        currentSketchBoundaries = New List(Of List(Of Vec2))()
+        For Each lp In canvas.SketchBoundaries
+            currentSketchBoundaries.Add(New List(Of Vec2)(lp))
+        Next
+
+        RebuildSketchDomainsFromBoundaries()
+        canvas.SketchDomains = ConvertToCanvasDomains(currentSketchDomains)
+
+        ' Il dominio-vista segue il profilo: si allarga se i punti escono
+        ' (mai si restringe durante l'editing, per non far saltare la vista).
+        Dim hasPts As Boolean = False
+        Dim bb As RectangleF = RectangleF.Empty
+        For Each lp In currentSketchBoundaries
+            If lp Is Nothing OrElse lp.Count = 0 Then Continue For
+            Dim b = Geo2D.GetBounds(lp)
+            If Not hasPts Then
+                bb = b
+                hasPts = True
+            Else
+                bb = RectangleF.Union(bb, b)
+            End If
+        Next
+        If hasPts Then
+            Dim pad As Single = 40.0F
+            Dim want As RectangleF = New RectangleF(bb.Left - pad, bb.Top - pad,
+                                                    bb.Width + pad * 2.0F, bb.Height + pad * 2.0F)
+            If Not currentWorldDomain.Contains(want) Then
+                currentWorldDomain = RectangleF.Union(currentWorldDomain, want)
+                canvas.Domain = currentWorldDomain
+            End If
+        End If
+
+        BuildFromCurrentSeeds()
+    End Sub
+
+    ' Ricostruisce le regioni (contorno + fori) dalle boundary correnti,
+    ' assegnando ogni foro al piu' piccolo contorno che lo contiene.
+    Private Sub RebuildSketchDomainsFromBoundaries()
+        currentSketchDomains = New List(Of SketchDomainRegion)()
+        Dim flags = canvas.SketchBoundaryIsHole
+
+        For i As Integer = 0 To currentSketchBoundaries.Count - 1
+            Dim isHole As Boolean = flags IsNot Nothing AndAlso i < flags.Count AndAlso flags(i)
+            If isHole Then Continue For
+
+            Dim r As New SketchDomainRegion()
+            r.Outer = New List(Of Vec2)(currentSketchBoundaries(i))
+            r.Bounds = Geo2D.GetBounds(r.Outer)
+            currentSketchDomains.Add(r)
+        Next
+
+        For i As Integer = 0 To currentSketchBoundaries.Count - 1
+            Dim isHole As Boolean = flags IsNot Nothing AndAlso i < flags.Count AndAlso flags(i)
+            If Not isHole Then Continue For
+
+            Dim h = currentSketchBoundaries(i)
+            Dim best As Integer = -1
+            Dim bestArea As Double = Double.MaxValue
+
+            For k As Integer = 0 To currentSketchDomains.Count - 1
+                If Geo2D.PolygonContainsPolygon(currentSketchDomains(k).Outer, h) Then
+                    Dim a As Double = Math.Abs(Geo2D.SignedArea(currentSketchDomains(k).Outer))
+                    If a < bestArea Then
+                        bestArea = a
+                        best = k
+                    End If
+                End If
+            Next
+
+            If best >= 0 Then
+                currentSketchDomains(best).Holes.Add(New List(Of Vec2)(h))
+            End If
+        Next
+    End Sub
+
     Private Sub Canvas_SeedColorsEdited(sender As Object, e As EventArgs)
         MarkProjectDirty()
         currentSeedCellColors = New List(Of Integer)(canvas.CellColorIndices)
@@ -2134,7 +2246,8 @@ Public Class MainForm
             canvas.Domain = domain
         End If
 
-        If useSketchDomains AndAlso currentSketchDomains IsNot Nothing AndAlso currentSketchDomains.Count > 0 Then
+        If useSketchDomains AndAlso Not (PeriodicXActive() OrElse PeriodicYActive()) AndAlso
+           currentSketchDomains IsNot Nothing AndAlso currentSketchDomains.Count > 0 Then
             Dim allCells As New List(Of VoronoiCell)
             Dim allSeeds As New List(Of Vec2)
             Dim allStyleKeys As New List(Of Integer)
@@ -2320,6 +2433,7 @@ Public Class MainForm
     Private Sub ApplyOptions()
         canvas.FillCells = chkFill.Checked
         canvas.ShowDomainFill = chkDomainFill.Checked
+        canvas.ShowDomainRect = chkPeriodicX.Checked OrElse chkPeriodicY.Checked
         canvas.FillSymbols = chkFillSymbols.Checked
         canvas.ShowOuterEdges = chkOuter.Checked
         canvas.ShowSeeds = chkSeeds.Checked
@@ -2910,12 +3024,14 @@ Public Class MainForm
         End While
     End Sub
 
+    ' La periodicita' e' intrinsecamente rettangolare: quando attiva, la
+    ' generazione ignora il profilo e usa il rettangolo del dominio.
     Private Function PeriodicXActive() As Boolean
-        Return chkPeriodicX.Checked AndAlso Not useSketchDomains
+        Return chkPeriodicX.Checked
     End Function
 
     Private Function PeriodicYActive() As Boolean
-        Return chkPeriodicY.Checked AndAlso Not useSketchDomains
+        Return chkPeriodicY.Checked
     End Function
 
     Private Sub GenerationParameterChanged(sender As Object, e As EventArgs)
@@ -4777,6 +4893,10 @@ Public Class HelpForm
         Item(rtb, "Shift+Wheel", "rotate that cell's symbol/block")
         Item(rtb, "Ctrl+Wheel", "cycle to the next/previous symbol or block (per cell, persistent)")
         Item(rtb, "Alt+Wheel", "cycle the cell color: Auto + the named palette (any style, persistent)")
+        Item(rtb, "Drag profile point", "reshape the profile: cells and seeds follow live; the view grows if you drag outside it")
+        Item(rtb, "Starting profile", "a new project starts with an editable rectangular profile; reading a profile from a file or Solid Edge replaces it entirely")
+        Item(rtb, "Double-click on profile edge", "insert a new point on that edge")
+        Item(rtb, "Alt+Click on profile point", "delete the point (each loop keeps at least 3)")
         Item(rtb, "Ctrl+Right drag", "zoom, Solid Edge style: forward = zoom out, backward = zoom in; anchored at the cursor")
         Item(rtb, "Ctrl+Shift+Right drag", "pan; press/release Shift during the drag to switch between zoom and pan")
         Item(rtb, "Alt+Right click", "reset the view (fit to domain)")
@@ -4810,7 +4930,7 @@ Public Class HelpForm
         Item(rtb, "Seed Placement", "seed distribution: Random; RandomNearBorders / RandomFarBorders (weighted); CircularGrid (concentric rings); RectangularGrid and Staggered (odd rows shifted half a step)")
         Item(rtb, "Cell Count", "requested number of seeds (grid patterns approximate it)")
         Item(rtb, "Random Seed", "generator seed: the same number reproduces the same pattern")
-        Item(rtb, "Periodic X / Y", "wrap the pattern on the domain edges (cylinder / torus): cells are computed with ghost seeds so opposite edges continue seamlessly; rectangular domain only")
+        Item(rtb, "Periodic X / Y", "wrap the pattern on the domain edges (cylinder / torus): cells are computed with ghost seeds so opposite edges continue seamlessly; intrinsically rectangular, so while active the profile is ignored and the domain rectangle (shown dashed) is used")
         Item(rtb, "Full boundary cells", "draw boundary cells whole, without cutting them on the domain border: works on the rectangle and on sketch profiles (holes included); with Periodic X the overflow lands exactly on the opposite edge when the sketch is wrapped on a cylinder")
         Item(rtb, "Relax", "Lloyd relaxation iterations, evens out cell sizes (0 keeps patterns exact)")
         Item(rtb, "Cell Scale", "global symbol size relative to each cell")
