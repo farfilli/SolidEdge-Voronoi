@@ -103,6 +103,21 @@ Public Module SvgExporter
             Next
         End If
 
+        ' Il riempimento del dominio/profilo fa parte del disegno: includilo nei bounds.
+        If canvas.ShowDomainFill Then
+            If canvas.SketchDomains IsNot Nothing AndAlso canvas.SketchDomains.Count > 0 Then
+                For Each d In canvas.SketchDomains
+                    If d Is Nothing OrElse d.Outer Is Nothing Then Continue For
+                    For Each p In d.Outer
+                        AccBounds(p, has, minX, minY, maxX, maxY)
+                    Next
+                Next
+            Else
+                AccBounds(New Vec2(canvas.Domain.Left, canvas.Domain.Top), has, minX, minY, maxX, maxY)
+                AccBounds(New Vec2(canvas.Domain.Right, canvas.Domain.Bottom), has, minX, minY, maxX, maxY)
+            End If
+        End If
+
         If Not has Then Exit Sub
 
         Dim diag As Double = Math.Sqrt((maxX - minX) * (maxX - minX) + (maxY - minY) * (maxY - minY))
@@ -119,6 +134,47 @@ Public Module SvgExporter
         Dim sb As New StringBuilder()
         sb.AppendLine("<?xml version=""1.0"" encoding=""UTF-8""?>")
         sb.AppendLine($"<svg xmlns=""http://www.w3.org/2000/svg"" version=""1.1"" viewBox=""{F(minX)} {F(minY)} {F(w)} {F(h)}"">")
+
+        ' 0) Domain fill: SOLO il "dentro" (profili sketch o rettangolo del
+        '    dominio) col colore del canvas. Lo sfondo del tema NON viene
+        '    esportato: fuori dal profilo l'SVG resta trasparente, e i fori
+        '    bucano davvero (fill-rule even-odd).
+        If canvas.ShowDomainFill Then
+            Dim bgIn As String = ColorToSvg(canvas.BackColor)
+
+            sb.AppendLine($"  <g id=""domainfill"" stroke=""none"">")
+
+            If canvas.SketchDomains IsNot Nothing AndAlso canvas.SketchDomains.Count > 0 Then
+                For Each d In canvas.SketchDomains
+                    If d Is Nothing OrElse d.Outer Is Nothing OrElse d.Outer.Count < 3 Then Continue For
+
+                    Dim fd As New StringBuilder()
+                    fd.Append($"M {F(d.Outer(0).X)} {F(d.Outer(0).Y)} ")
+                    For k As Integer = 1 To d.Outer.Count - 1
+                        fd.Append($"L {F(d.Outer(k).X)} {F(d.Outer(k).Y)} ")
+                    Next
+                    fd.Append("Z")
+
+                    If d.Holes IsNot Nothing Then
+                        For Each hle In d.Holes
+                            If hle Is Nothing OrElse hle.Count < 3 Then Continue For
+                            fd.Append($" M {F(hle(0).X)} {F(hle(0).Y)} ")
+                            For k As Integer = 1 To hle.Count - 1
+                                fd.Append($"L {F(hle(k).X)} {F(hle(k).Y)} ")
+                            Next
+                            fd.Append("Z")
+                        Next
+                    End If
+
+                    sb.AppendLine($"    <path d=""{fd}"" fill=""{bgIn}"" fill-rule=""evenodd"" />")
+                Next
+            Else
+                Dim dm = canvas.Domain
+                sb.AppendLine($"    <rect x=""{F(dm.Left)}"" y=""{F(dm.Top)}"" width=""{F(dm.Width)}"" height=""{F(dm.Height)}"" fill=""{bgIn}"" />")
+            End If
+
+            sb.AppendLine("  </g>")
+        End If
 
         ' 1) Contorno sketch (giallo = esterno, rosso = foro).
         If canvas.ShowSketchBoundary AndAlso canvas.SketchBoundaries IsNot Nothing AndAlso canvas.SketchBoundaries.Count > 0 Then

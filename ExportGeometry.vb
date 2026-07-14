@@ -215,6 +215,10 @@ Public Class BlockDefinition
     ' Punto base/origine del blocco in SE (su cui SE applica scala e rotazione
     ' dell'occorrenza), in mm nel nostro frame Y-in-basso.
     Public Property BaseOrigin As Vec2 = New Vec2(0, 0)
+
+    ' Fattore di scala utente del blocco (Block Library): moltiplica la scala
+    ' calcolata dalla cella, sia a video sia nelle occorrenze in Solid Edge.
+    Public Property UserScale As Double = 1.0
 End Class
 
 Public Class CellGeometry
@@ -389,6 +393,7 @@ Public Module ExportGeometry
 
         ' Scala dal raggio del cerchio equivalente all'area della cella.
         Dim radius As Double = BlockRadiusFromArea(cell, scaleFactor, canvas)
+        radius *= Math.Max(0.05, Math.Min(3.0, def.UserScale))
 
         ' Ancoraggio: il punto base del blocco coincide col seed della cella.
         Dim anchor As Vec2 = Geo2D.PolygonCentroid(cell.Vertices)
@@ -449,6 +454,7 @@ Public Module ExportGeometry
 
         Dim maxR As Double = def.NativeRadius
         Dim radius As Double = BlockRadiusFromArea(cell, scaleFactor, canvas)
+        radius *= Math.Max(0.05, Math.Min(3.0, def.UserScale))
 
         Dim angle As Double = 0.0
         If randomRotation Then angle = GetStableAngleFromKey(canvas, cellIndex)
@@ -1790,6 +1796,7 @@ Public Module ExportGeometry
                 sb.AppendLine("ORIGIN " & Fmt(b.BaseOrigin.X) & " " & Fmt(b.BaseOrigin.Y))
                 sb.AppendLine("NCENTER " & Fmt(b.NativeCenter.X) & " " & Fmt(b.NativeCenter.Y))
                 sb.AppendLine("NRADIUS " & Fmt(b.NativeRadius))
+                sb.AppendLine("USCALE " & Fmt(b.UserScale))
 
                 If b.Entities IsNot Nothing Then
                     For Each pth In b.Entities
@@ -1840,6 +1847,11 @@ Public Module ExportGeometry
                     If cur IsNot Nothing Then cur.NativeCenter = ParseVec(rest)
                 Case "NRADIUS"
                     If cur IsNot Nothing Then cur.NativeRadius = ParseD(rest)
+                Case "USCALE"
+                    If cur IsNot Nothing Then
+                        Dim us As Double = ParseD(rest)
+                        cur.UserScale = If(us > 0.0001, us, 1.0)
+                    End If
                 Case "PATH"
                     If cur IsNot Nothing Then
                         curPath = New ExportPath2D()

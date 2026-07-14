@@ -65,6 +65,15 @@ Public Class VoronoiCanvas
     Public Property SketchBoundaryIsHole As List(Of Boolean) = New List(Of Boolean)
     Public Property ShowSketchBoundary As Boolean = True
 
+    ' Colore dell'area FUORI dal profilo sketch (legato al tema, impostato da
+    ' MainForm). Dentro il profilo resta BackColor; i fori sono "fuori".
+    Public Property OutsideProfileColor As Color = Color.FromArgb(13, 11, 66)
+
+    ' Mostra/nasconde il riempimento del profilo/rettangolo di partenza
+    ' (dentro = BackColor). Lo sfondo del canvas e' SEMPRE il colore a tema
+    ' (OutsideProfileColor), indipendentemente da questa opzione.
+    Public Property ShowDomainFill As Boolean = True
+
     Public Property FillCells As Boolean = True
     Public Property FillSymbols As Boolean = False
     Public Property ShowOuterEdges As Boolean = True
@@ -243,15 +252,58 @@ Public Class VoronoiCanvas
     End Sub
 
     Private Sub RenderScene(g As Graphics, view As ViewInfo)
-        g.Clear(BackColor)
         g.SmoothingMode = SmoothingMode.AntiAlias
         g.PixelOffsetMode = PixelOffsetMode.HighQuality
+        FillCanvasBackground(g, view)
 
         DrawBounds(g, view)
         DrawSketchBoundary(g, view)
         DrawCells(g, view)
         DrawSelectedCellOutline(g, view)
         DrawSeeds(g, view)
+    End Sub
+
+    ' Sfondo: senza profili sketch e' il BackColor pieno; con profili, il fuori
+    ' assume OutsideProfileColor e l'interno dei domini (meno i fori) BackColor.
+    Private Sub FillCanvasBackground(g As Graphics, view As ViewInfo)
+        ' Sfondo sempre coerente al tema.
+        g.Clear(OutsideProfileColor)
+
+        ' Il riempimento interno (profilo o rettangolo) e' opzionale.
+        If Not ShowDomainFill Then Return
+
+        If SketchDomains Is Nothing OrElse SketchDomains.Count = 0 Then
+            ' Senza profilo: il "dentro" e' il rettangolo del dominio.
+            Dim p1 = WorldToScreen(New Vec2(Domain.Left, Domain.Top), view)
+            Dim p2 = WorldToScreen(New Vec2(Domain.Right, Domain.Bottom), view)
+            Using inBrush As New SolidBrush(BackColor)
+                g.FillRectangle(inBrush, p1.X, p1.Y, p2.X - p1.X, p2.Y - p1.Y)
+            End Using
+            Return
+        End If
+
+        Using inBrush As New SolidBrush(BackColor), outBrush As New SolidBrush(OutsideProfileColor)
+            For Each d In SketchDomains
+                If d Is Nothing OrElse d.Outer Is Nothing OrElse d.Outer.Count < 3 Then Continue For
+
+                Dim pts(d.Outer.Count - 1) As PointF
+                For k As Integer = 0 To d.Outer.Count - 1
+                    pts(k) = WorldToScreen(d.Outer(k), view)
+                Next
+                g.FillPolygon(inBrush, pts)
+
+                If d.Holes IsNot Nothing Then
+                    For Each h In d.Holes
+                        If h Is Nothing OrElse h.Count < 3 Then Continue For
+                        Dim hp(h.Count - 1) As PointF
+                        For k As Integer = 0 To h.Count - 1
+                            hp(k) = WorldToScreen(h(k), view)
+                        Next
+                        g.FillPolygon(outBrush, hp)
+                    Next
+                End If
+            Next
+        End Using
     End Sub
 
     ' Vista fit-to-domain per una superficie di dimensioni arbitrarie (export).

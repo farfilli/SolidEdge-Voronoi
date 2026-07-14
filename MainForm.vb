@@ -57,11 +57,13 @@ Public Class MainForm
 
     Private ReadOnly chkFill As New ThemedCheckBox()
     Private ReadOnly chkFillSymbols As New ThemedCheckBox()
+    Private ReadOnly chkDomainFill As New ThemedCheckBox()
     Private ReadOnly chkOuter As New ThemedCheckBox()
     Private ReadOnly chkSeeds As New ThemedCheckBox()
     Private ReadOnly chkInner As New ThemedCheckBox()
     Private ReadOnly chkRandomRotation As New ThemedCheckBox()
     Private ReadOnly chkExportAsBlocks As New ThemedCheckBox()
+    Private ReadOnly chkExportProfile As New ThemedCheckBox()
     Private ReadOnly chkPeriodicX As New ThemedCheckBox()
     Private ReadOnly chkPeriodicY As New ThemedCheckBox()
     Private ReadOnly chkFullSeamCells As New ThemedCheckBox()
@@ -147,6 +149,7 @@ Public Class MainForm
         currentWorldDomain = domain
         canvas.Domain = currentWorldDomain
         canvas.BackColor = UiTheme.BgCanvas
+        canvas.OutsideProfileColor = UiTheme.BgSidebar
 
         Controls.Add(canvas)
         Controls.Add(sidebar)
@@ -189,6 +192,7 @@ Public Class MainForm
         AddHandler btnToSolidEdge.Click, AddressOf ExportToSolidEdge_Click
 
         AddHandler chkFill.CheckedChanged, AddressOf RefreshCanvasOptions
+        AddHandler chkDomainFill.CheckedChanged, AddressOf RefreshCanvasOptions
         AddHandler chkFillSymbols.CheckedChanged, AddressOf RefreshCanvasOptions
         AddHandler chkFillSymbols.CheckedChanged, AddressOf RefreshLibraryHandler
         AddHandler chkOuter.CheckedChanged, AddressOf RefreshCanvasOptions
@@ -216,6 +220,7 @@ Public Class MainForm
         AddHandler numRelax.ValueChanged, AddressOf GenerationParameterChanged
         AddHandler cmbSeedMode.SelectedIndexChanged, AddressOf GenerationParameterChanged
         AddHandler chkExportAsBlocks.CheckedChanged, AddressOf ExportAsBlocks_Changed
+        AddHandler chkExportProfile.CheckedChanged, AddressOf ExportAsBlocks_Changed
         AddHandler chkPeriodicX.CheckedChanged, AddressOf GenerationParameterChanged
         AddHandler chkPeriodicY.CheckedChanged, AddressOf GenerationParameterChanged
         AddHandler chkFullSeamCells.CheckedChanged, AddressOf GenerationParameterChanged
@@ -288,12 +293,13 @@ Public Class MainForm
              "Vertex Size", numVertexTrim)
         AddDoubleRow("Inner Offset", numInnerOffset,
              "Curve Width", numCurveWidth)
-        AddRowControl(chkFill, 22)
-        AddRowControl(chkFillSymbols, 22)
         AddRowControl(chkRandomRotation, 22)
 
         ' ===== DISPLAY =====
         curSection = NewSection("DISPLAY", False)
+        AddRowControl(chkFill, 22)
+        AddRowControl(chkFillSymbols, 22)
+        AddRowControl(chkDomainFill, 22)
         AddRowControl(chkOuter, 22)
         AddRowControl(chkSeeds, 22)
         AddRowControl(chkInner, 22)
@@ -368,8 +374,15 @@ Public Class MainForm
         chkExportAsBlocks.Text = "As blocks"
         chkExportAsBlocks.Width = 84
         chkExportAsBlocks.Height = 22
-        chkExportAsBlocks.Location = New Point(x, 30)
+        chkExportAsBlocks.Location = New Point(x, 10)
         topBar.Controls.Add(chkExportAsBlocks)
+
+        chkExportProfile.Text = "Profile"
+        chkExportProfile.Width = 84
+        chkExportProfile.Height = 22
+        chkExportProfile.Location = New Point(x, 34)
+        topBar.Controls.Add(chkExportProfile)
+
         x += chkExportAsBlocks.Width + 8
 
         ' Lato destro (riposizionato dal Resize): toggle tema + Help.
@@ -530,7 +543,7 @@ Public Class MainForm
 
         lblSelInfo.ForeColor = UiTheme.TxtDim
 
-        For Each chk In New CheckBox() {chkFill, chkFillSymbols, chkOuter, chkSeeds, chkInner, chkRandomRotation, chkExportAsBlocks, chkDarkTheme, chkSelPinned, chkPeriodicX, chkPeriodicY, chkFullSeamCells}
+        For Each chk In New CheckBox() {chkFill, chkFillSymbols, chkDomainFill, chkOuter, chkSeeds, chkInner, chkRandomRotation, chkExportAsBlocks, chkExportProfile, chkDarkTheme, chkSelPinned, chkPeriodicX, chkPeriodicY, chkFullSeamCells}
             chk.ForeColor = UiTheme.Txt
             chk.BackColor = UiTheme.BgSidebar
         Next
@@ -547,6 +560,7 @@ Public Class MainForm
 
         BackColor = UiTheme.BgCanvas
         canvas.BackColor = UiTheme.BgCanvas
+        canvas.OutsideProfileColor = UiTheme.BgSidebar
 
         sidebar.BackColor = UiTheme.BgSidebar
         sideViewport.BackColor = UiTheme.BgSidebar
@@ -1126,11 +1140,13 @@ Public Class MainForm
         Dim bVal As Boolean
         If map.TryGetValue("FillCells", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkFill.Checked = bVal
         If map.TryGetValue("FillSymbols", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkFillSymbols.Checked = bVal
+        If map.TryGetValue("DomainFill", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkDomainFill.Checked = bVal
         If map.TryGetValue("RandomRotation", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkRandomRotation.Checked = bVal
         If map.TryGetValue("ShowOuter", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkOuter.Checked = bVal
         If map.TryGetValue("ShowSeeds", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkSeeds.Checked = bVal
         If map.TryGetValue("ShowInner", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkInner.Checked = bVal
         If map.TryGetValue("ExportAsBlocks", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkExportAsBlocks.Checked = bVal
+        If map.TryGetValue("ExportProfile", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkExportProfile.Checked = bVal
         If map.TryGetValue("PeriodicX", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkPeriodicX.Checked = bVal
         If map.TryGetValue("PeriodicY", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkPeriodicY.Checked = bVal
         If map.TryGetValue("FullSeamCells", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkFullSeamCells.Checked = bVal
@@ -1151,11 +1167,13 @@ Public Class MainForm
             "CurveWidth=" & FInv(numCurveWidth.Value),
             "FillCells=" & chkFill.Checked.ToString(),
             "FillSymbols=" & chkFillSymbols.Checked.ToString(),
+            "DomainFill=" & chkDomainFill.Checked.ToString(),
             "RandomRotation=" & chkRandomRotation.Checked.ToString(),
             "ShowOuter=" & chkOuter.Checked.ToString(),
             "ShowSeeds=" & chkSeeds.Checked.ToString(),
             "ShowInner=" & chkInner.Checked.ToString(),
             "ExportAsBlocks=" & chkExportAsBlocks.Checked.ToString(),
+            "ExportProfile=" & chkExportProfile.Checked.ToString(),
             "PeriodicX=" & chkPeriodicX.Checked.ToString(),
             "PeriodicY=" & chkPeriodicY.Checked.ToString(),
             "FullSeamCells=" & chkFullSeamCells.Checked.ToString()
@@ -1376,6 +1394,9 @@ Public Class MainForm
         selSymbolOffset.Increment = 1D
         selSymbolOffset.Value = 0D
         selSymbolOffset.Enabled = False
+
+        chkDomainFill.Text = "Domain fill"
+        chkDomainFill.Checked = True
 
         chkPeriodicX.Text = "Periodic X (cylinder)"
         chkPeriodicX.Checked = False
@@ -2298,6 +2319,7 @@ Public Class MainForm
 
     Private Sub ApplyOptions()
         canvas.FillCells = chkFill.Checked
+        canvas.ShowDomainFill = chkDomainFill.Checked
         canvas.FillSymbols = chkFillSymbols.Checked
         canvas.ShowOuterEdges = chkOuter.Checked
         canvas.ShowSeeds = chkSeeds.Checked
@@ -2689,6 +2711,36 @@ Public Class MainForm
         Return result
     End Function
 
+    ' Loop del profilo sketch (contorni e fori) come path esportabili.
+    Private Function BuildProfileExportPaths() As List(Of ExportPath2D)
+        Dim result As New List(Of ExportPath2D)
+        If canvas.SketchBoundaries Is Nothing Then Return result
+
+        For Each lp In canvas.SketchBoundaries
+            If lp Is Nothing OrElse lp.Count < 2 Then Continue For
+
+            Dim p As New ExportPath2D() With {
+                .Closed = True,
+                .StrokeColor = Color.Black,
+                .StrokeWidth = CSng(numCurveWidth.Value)
+            }
+
+            For i As Integer = 0 To lp.Count - 1
+                p.Segments.Add(New ExportLine2D(lp(i), lp((i + 1) Mod lp.Count)))
+            Next
+
+            result.Add(p)
+        Next
+
+        Return result
+    End Function
+
+    Private Sub AppendProfilePaths(ByRef paths As List(Of ExportPath2D))
+        If Not chkExportProfile.Checked Then Return
+        If paths Is Nothing Then paths = New List(Of ExportPath2D)()
+        paths.AddRange(BuildProfileExportPaths())
+    End Sub
+
     Private Sub ExportSvg_Click(sender As Object, e As EventArgs)
         Try
             Dim paths = ExportGeometry.BuildExportPaths(canvas)
@@ -2806,8 +2858,16 @@ Public Class MainForm
                     Return
                 End If
                 SolidEdgeExporter.ExportToActivePartSketch(geoms, currentBlockSymbols)
+
+                If chkExportProfile.Checked Then
+                    Dim profilePaths = BuildProfileExportPaths()
+                    If profilePaths.Count > 0 Then
+                        SolidEdgeExporter.ExportToActivePartSketch(profilePaths)
+                    End If
+                End If
             Else
                 Dim paths = ExportGeometry.BuildExportPaths(canvas)
+                AppendProfilePaths(paths)
                 If paths Is Nothing OrElse paths.Count = 0 Then
                     MessageBox.Show("No geometry to export.", "Solid Edge", MessageBoxButtons.OK, MessageBoxIcon.Information)
                     Return
@@ -3186,7 +3246,7 @@ Public Class BlockLibraryForm
 
         Dim btnDel As New ThemedButton()
         btnDel.Text = "Remove"
-        btnDel.Width = ThumbPx
+        btnDel.Width = ThumbPx - 60
         btnDel.Height = 22
         btnDel.Left = 8
         btnDel.Top = ThumbPx + 26
@@ -3198,6 +3258,24 @@ Public Class BlockLibraryForm
         Dim target As BlockDefinition = def
         AddHandler btnDel.Click, Sub(s, e) RemoveBlock(target)
         tile.Controls.Add(btnDel)
+
+        ' Scala primaria del blocco: moltiplica la dimensione calcolata dalla
+        ' cella, ovunque il blocco venga usato (canvas, export, Solid Edge).
+        Dim numScale As New ThemedNumericUpDown()
+        numScale.Minimum = 0.05D
+        numScale.Maximum = 3D
+        numScale.DecimalPlaces = 2
+        numScale.Increment = 0.05D
+        numScale.Value = CDec(Math.Max(0.05, Math.Min(3.0, target.UserScale)))
+        numScale.Width = 54
+        numScale.Height = 22
+        numScale.Left = btnDel.Left + btnDel.Width + 4
+        numScale.Top = btnDel.Top
+        AddHandler numScale.ValueChanged, Sub(s, e)
+                                              target.UserScale = CDbl(numScale.Value)
+                                              RaiseEvent BlocksChanged(Me, EventArgs.Empty)
+                                          End Sub
+        tile.Controls.Add(numScale)
 
         Return tile
     End Function
@@ -4717,12 +4795,14 @@ Public Class HelpForm
         Item(rtb, "Generate / New Seed", "rebuild the diagram; New Seed increments Random Seed first")
         Item(rtb, "Read Sketch", "reads the active Solid Edge sketch as the generation domain (holes supported)")
         Item(rtb, "Read SE Blocks", "imports block definitions from the document (additive, deduplicated by name)")
+        Item(rtb, "Block scale (library)", "each block tile has a scale factor next to Remove: it multiplies the size computed from the cell, everywhere the block is used (canvas, export, Solid Edge occurrences)")
         Item(rtb, "Load / Save / Clear", "block library files (.sevb); Clear empties the memory")
         Item(rtb, "Library", "preview gallery of loaded blocks, with per-block removal")
         Item(rtb, "SVG / DXF", "vector output of the current geometry")
         Item(rtb, "PNG", "2000 px image of the whole domain (ignores zoom/pan)")
         Item(rtb, "To Solid Edge", "draws into the active sketch (missing block definitions are created)")
         Item(rtb, "As blocks", "checkbox next to To Solid Edge: emits block occurrences instead of raw geometry")
+        Item(rtb, "Profile", "To Solid Edge only (like As blocks): also draws the sketch boundary loops (outer contours and holes) into the target sketch; PNG and SVG follow the DISPLAY section instead")
         Item(rtb, "Dark theme / Help", "right side of the toolbar: palette toggle and this window")
         Gap(rtb)
 
@@ -4742,6 +4822,7 @@ Public Class HelpForm
         Item(rtb, "Vertex Size", "amount of corner trimming")
         Item(rtb, "Inner Offset", "inset of the inner curve from the cell borders")
         Item(rtb, "Curve Width", "stroke width (canvas, exports and block previews)")
+        Item(rtb, "Domain fill", "fill the sketch profile or the starting rectangle with the canvas color; the background around it always follows the theme")
         Item(rtb, "Fill cells", "translucent background of each cell")
         Item(rtb, "Fill symbols", "even-odd fill of symbols/blocks: nested profiles become holes")
         Item(rtb, "Random symbol rotation", "stable random rotation per cell")
