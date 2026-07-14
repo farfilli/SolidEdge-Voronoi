@@ -860,7 +860,38 @@ Public Class VoronoiCanvas
     End Function
 
     ' Riporta la vista al fit-to-domain iniziale.
+    Public Event DomainChangedByFit As EventHandler
+
     Public Sub ResetView()
+        ' Il FIT si riallinea al profilo ATTUALE: il dominio-vista viene
+        ' ricalcolato dai loop correnti (le aree dove c'erano punti poi
+        ' spostati o eliminati non contano piu').
+        If SketchBoundaries IsNot Nothing AndAlso SketchBoundaries.Count > 0 Then
+            Dim has As Boolean = False
+            Dim bb As RectangleF = RectangleF.Empty
+
+            For Each lp In SketchBoundaries
+                If lp Is Nothing OrElse lp.Count = 0 Then Continue For
+                Dim b = Geo2D.GetBounds(lp)
+                If Not has Then
+                    bb = b
+                    has = True
+                Else
+                    bb = RectangleF.Union(bb, b)
+                End If
+            Next
+
+            If has AndAlso bb.Width > 0.0001F AndAlso bb.Height > 0.0001F Then
+                Dim pad As Single = 40.0F
+                Dim newDom As New RectangleF(bb.Left - pad, bb.Top - pad,
+                                             bb.Width + pad * 2.0F, bb.Height + pad * 2.0F)
+                If newDom <> Domain Then
+                    Domain = newDom
+                    RaiseEvent DomainChangedByFit(Me, EventArgs.Empty)
+                End If
+            End If
+        End If
+
         viewZoom = 1.0
         viewPanX = 0.0
         viewPanY = 0.0
@@ -1343,7 +1374,12 @@ Public Class VoronoiCanvas
         If isBoundDragging AndAlso dragBoundLoop >= 0 AndAlso
            SketchBoundaries IsNot Nothing AndAlso dragBoundLoop < SketchBoundaries.Count AndAlso
            dragBoundPt >= 0 AndAlso dragBoundPt < SketchBoundaries(dragBoundLoop).Count Then
-            SketchBoundaries(dragBoundLoop)(dragBoundPt) = ScreenToWorld(e.Location)
+            ' Il punto si ferma al bordo visibile: nessuno zoom/espansione
+            ' automatica; per andare oltre l'utente zooma o panna da solo.
+            Dim loc As Point = e.Location
+            loc.X = Math.Max(2, Math.Min(ClientSize.Width - 2, loc.X))
+            loc.Y = Math.Max(2, Math.Min(ClientSize.Height - 2, loc.Y))
+            SketchBoundaries(dragBoundLoop)(dragBoundPt) = ScreenToWorld(loc)
             RaiseEvent SketchBoundariesEdited(Me, EventArgs.Empty)
             Invalidate()
             Return

@@ -91,7 +91,16 @@ Public Class MainForm
 
     Private Function GetSelectedDomainColor() As Color
         Dim idx As Integer = cmbDomainColor.SelectedIndex
-        If idx <= 0 OrElse idx >= DomainColorValues.Length Then Return UiTheme.BgCanvas
+        If idx <= 0 OrElse idx >= DomainColorValues.Length Then
+            ' "Theme": BgCanvas e' navy per design in entrambi i temi, quindi
+            ' qui si sceglie esplicitamente in base al tema attivo (in chiaro
+            ' un tono "carta", distinto dal grigio sidebar del fuori-profilo).
+            If UiTheme.IsDark Then
+                Return UiTheme.BgCanvas
+            Else
+                Return Color.FromArgb(252, 252, 249)
+            End If
+        End If
         Return DomainColorValues(idx)
     End Function
     Private ReadOnly chkOuter As New ThemedCheckBox()
@@ -253,6 +262,7 @@ Public Class MainForm
         AddHandler canvas.SeedSymbolOffsetsEdited, AddressOf Canvas_SeedSymbolOffsetsEdited
         AddHandler canvas.SeedColorsEdited, AddressOf Canvas_SeedColorsEdited
         AddHandler canvas.SketchBoundariesEdited, AddressOf Canvas_SketchBoundariesEdited
+        AddHandler canvas.DomainChangedByFit, AddressOf Canvas_DomainChangedByFit
 
         AddHandler numCells.ValueChanged, AddressOf GenerationParameterChanged
         AddHandler numSeed.ValueChanged, AddressOf GenerationParameterChanged
@@ -2036,6 +2046,11 @@ Public Class MainForm
         canvas.Domain = currentWorldDomain
     End Sub
 
+    ' Il FIT (ALT+RMB) ha ricalcolato il dominio dal profilo: sincronizzo.
+    Private Sub Canvas_DomainChangedByFit(sender As Object, e As EventArgs)
+        currentWorldDomain = canvas.Domain
+    End Sub
+
     Private Sub Canvas_SketchBoundariesEdited(sender As Object, e As EventArgs)
         MarkProjectDirty()
 
@@ -2046,30 +2061,6 @@ Public Class MainForm
 
         RebuildSketchDomainsFromBoundaries()
         canvas.SketchDomains = ConvertToCanvasDomains(currentSketchDomains)
-
-        ' Il dominio-vista segue il profilo: si allarga se i punti escono
-        ' (mai si restringe durante l'editing, per non far saltare la vista).
-        Dim hasPts As Boolean = False
-        Dim bb As RectangleF = RectangleF.Empty
-        For Each lp In currentSketchBoundaries
-            If lp Is Nothing OrElse lp.Count = 0 Then Continue For
-            Dim b = Geo2D.GetBounds(lp)
-            If Not hasPts Then
-                bb = b
-                hasPts = True
-            Else
-                bb = RectangleF.Union(bb, b)
-            End If
-        Next
-        If hasPts Then
-            Dim pad As Single = 40.0F
-            Dim want As RectangleF = New RectangleF(bb.Left - pad, bb.Top - pad,
-                                                    bb.Width + pad * 2.0F, bb.Height + pad * 2.0F)
-            If Not currentWorldDomain.Contains(want) Then
-                currentWorldDomain = RectangleF.Union(currentWorldDomain, want)
-                canvas.Domain = currentWorldDomain
-            End If
-        End If
 
         BuildFromCurrentSeeds()
     End Sub
@@ -4940,7 +4931,7 @@ Public Class HelpForm
         Item(rtb, "Shift+Wheel", "rotate that cell's symbol/block")
         Item(rtb, "Ctrl+Wheel", "cycle to the next/previous symbol or block (per cell, persistent)")
         Item(rtb, "Alt+Wheel", "cycle the cell color: Auto + the named palette (any style, persistent)")
-        Item(rtb, "Drag profile point", "reshape the profile: cells and seeds follow live; the view grows if you drag outside it")
+        Item(rtb, "Drag profile point", "reshape the profile: cells and seeds follow live; the drag stops at the window border (zoom or pan yourself to go further), and ALT+RMB refits the view on the current profile")
         Item(rtb, "Starting profile", "a new project starts with an editable rectangular profile; reading a profile from a file or Solid Edge replaces it entirely")
         Item(rtb, "Double-click on profile edge", "insert a new point on that edge")
         Item(rtb, "Alt+Click on profile point", "delete the point (each loop keeps at least 3)")
