@@ -78,6 +78,10 @@ Public Class VoronoiCanvas
     ' attiva (e' il periodo); altrimenti il profilo editabile basta.
     Public Property ShowDomainRect As Boolean = False
 
+    ' Colore di riempimento del dominio/profilo (selezionabile in STYLE);
+    ' di default segue il tema (impostato da MainForm).
+    Public Property DomainFillColor As Color = Color.FromArgb(8, 6, 53)
+
     Public Property FillCells As Boolean = True
     Public Property FillSymbols As Boolean = False
     Public Property ShowOuterEdges As Boolean = True
@@ -289,13 +293,13 @@ Public Class VoronoiCanvas
             ' Senza profilo: il "dentro" e' il rettangolo del dominio.
             Dim p1 = WorldToScreen(New Vec2(Domain.Left, Domain.Top), view)
             Dim p2 = WorldToScreen(New Vec2(Domain.Right, Domain.Bottom), view)
-            Using inBrush As New SolidBrush(BackColor)
+            Using inBrush As New SolidBrush(DomainFillColor)
                 g.FillRectangle(inBrush, p1.X, p1.Y, p2.X - p1.X, p2.Y - p1.Y)
             End Using
             Return
         End If
 
-        Using inBrush As New SolidBrush(BackColor), outBrush As New SolidBrush(OutsideProfileColor)
+        Using inBrush As New SolidBrush(DomainFillColor), outBrush As New SolidBrush(OutsideProfileColor)
             For Each d In SketchDomains
                 If d Is Nothing OrElse d.Outer Is Nothing OrElse d.Outer.Count < 3 Then Continue For
 

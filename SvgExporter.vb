@@ -140,7 +140,7 @@ Public Module SvgExporter
         '    esportato: fuori dal profilo l'SVG resta trasparente, e i fori
         '    bucano davvero (fill-rule even-odd).
         If canvas.ShowDomainFill Then
-            Dim bgIn As String = ColorToSvg(canvas.BackColor)
+            Dim bgIn As String = ColorToSvg(canvas.DomainFillColor)
 
             sb.AppendLine($"  <g id=""domainfill"" stroke=""none"">")
 

@@ -58,6 +58,42 @@ Public Class MainForm
     Private ReadOnly chkFill As New ThemedCheckBox()
     Private ReadOnly chkFillSymbols As New ThemedCheckBox()
     Private ReadOnly chkDomainFill As New ThemedCheckBox()
+    Private ReadOnly cmbDomainColor As New ThemedComboBox()
+
+    ' Tavolozza degli sfondi del dominio: parente di quella delle celle ma
+    ' scurita e deviata di tono, cosi' velature e simboli restano leggibili.
+    Private Shared ReadOnly DomainColorNames As String() = {
+        "Theme", "Deep Navy", "Midnight", "Ink Blue", "Deep Petrol",
+        "Dark Teal", "Deep Lagoon", "Deep Indigo", "Dark Violet", "Aubergine",
+        "Burgundy", "Forest", "Bronze Shadow", "Charcoal", "Slate",
+        "Paper", "Light Gray"
+    }
+
+    Private Shared ReadOnly DomainColorValues As Color() = {
+        Color.Empty,
+        Color.FromArgb(8, 6, 53),
+        Color.FromArgb(4, 10, 34),
+        Color.FromArgb(10, 20, 66),
+        Color.FromArgb(4, 44, 56),
+        Color.FromArgb(6, 56, 52),
+        Color.FromArgb(0, 38, 64),
+        Color.FromArgb(22, 16, 72),
+        Color.FromArgb(34, 10, 58),
+        Color.FromArgb(44, 12, 44),
+        Color.FromArgb(48, 12, 22),
+        Color.FromArgb(10, 40, 26),
+        Color.FromArgb(46, 34, 10),
+        Color.FromArgb(24, 26, 30),
+        Color.FromArgb(38, 44, 54),
+        Color.FromArgb(238, 236, 228),
+        Color.FromArgb(216, 220, 226)
+    }
+
+    Private Function GetSelectedDomainColor() As Color
+        Dim idx As Integer = cmbDomainColor.SelectedIndex
+        If idx <= 0 OrElse idx >= DomainColorValues.Length Then Return UiTheme.BgCanvas
+        Return DomainColorValues(idx)
+    End Function
     Private ReadOnly chkOuter As New ThemedCheckBox()
     Private ReadOnly chkSeeds As New ThemedCheckBox()
     Private ReadOnly chkInner As New ThemedCheckBox()
@@ -150,6 +186,7 @@ Public Class MainForm
         canvas.Domain = currentWorldDomain
         canvas.BackColor = UiTheme.BgCanvas
         canvas.OutsideProfileColor = UiTheme.BgSidebar
+        canvas.DomainFillColor = GetSelectedDomainColor()
 
         Controls.Add(canvas)
         Controls.Add(sidebar)
@@ -193,6 +230,7 @@ Public Class MainForm
 
         AddHandler chkFill.CheckedChanged, AddressOf RefreshCanvasOptions
         AddHandler chkDomainFill.CheckedChanged, AddressOf RefreshCanvasOptions
+        AddHandler cmbDomainColor.SelectedIndexChanged, AddressOf RefreshCanvasOptions
         AddHandler chkFillSymbols.CheckedChanged, AddressOf RefreshCanvasOptions
         AddHandler chkFillSymbols.CheckedChanged, AddressOf RefreshLibraryHandler
         AddHandler chkOuter.CheckedChanged, AddressOf RefreshCanvasOptions
@@ -295,6 +333,8 @@ Public Class MainForm
              "Vertex Size", numVertexTrim)
         AddDoubleRow("Inner Offset", numInnerOffset,
              "Curve Width", numCurveWidth)
+        AddRowTitle("Domain Color")
+        AddRowControl(cmbDomainColor)
         AddRowControl(chkRandomRotation, 22)
 
         ' ===== DISPLAY =====
@@ -563,6 +603,7 @@ Public Class MainForm
         BackColor = UiTheme.BgCanvas
         canvas.BackColor = UiTheme.BgCanvas
         canvas.OutsideProfileColor = UiTheme.BgSidebar
+        canvas.DomainFillColor = GetSelectedDomainColor()
 
         sidebar.BackColor = UiTheme.BgSidebar
         sideViewport.BackColor = UiTheme.BgSidebar
@@ -1139,6 +1180,7 @@ Public Class MainForm
         If map.TryGetValue("FillCells", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkFill.Checked = bVal
         If map.TryGetValue("FillSymbols", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkFillSymbols.Checked = bVal
         If map.TryGetValue("DomainFill", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkDomainFill.Checked = bVal
+        If map.TryGetValue("DomainColor", sVal) AndAlso cmbDomainColor.Items.Contains(sVal) Then cmbDomainColor.SelectedItem = sVal
         If map.TryGetValue("RandomRotation", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkRandomRotation.Checked = bVal
         If map.TryGetValue("ShowOuter", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkOuter.Checked = bVal
         If map.TryGetValue("ShowSeeds", sVal) AndAlso Boolean.TryParse(sVal, bVal) Then chkSeeds.Checked = bVal
@@ -1166,6 +1208,7 @@ Public Class MainForm
             "FillCells=" & chkFill.Checked.ToString(),
             "FillSymbols=" & chkFillSymbols.Checked.ToString(),
             "DomainFill=" & chkDomainFill.Checked.ToString(),
+            "DomainColor=" & If(cmbDomainColor.SelectedItem IsNot Nothing, cmbDomainColor.SelectedItem.ToString(), "Theme"),
             "RandomRotation=" & chkRandomRotation.Checked.ToString(),
             "ShowOuter=" & chkOuter.Checked.ToString(),
             "ShowSeeds=" & chkSeeds.Checked.ToString(),
@@ -1395,6 +1438,9 @@ Public Class MainForm
 
         chkDomainFill.Text = "Domain fill"
         chkDomainFill.Checked = True
+
+        cmbDomainColor.Items.AddRange(DomainColorNames)
+        cmbDomainColor.SelectedIndex = 0
 
         chkPeriodicX.Text = "Periodic X (cylinder)"
         chkPeriodicX.Checked = False
@@ -2433,6 +2479,7 @@ Public Class MainForm
     Private Sub ApplyOptions()
         canvas.FillCells = chkFill.Checked
         canvas.ShowDomainFill = chkDomainFill.Checked
+        canvas.DomainFillColor = GetSelectedDomainColor()
         canvas.ShowDomainRect = chkPeriodicX.Checked OrElse chkPeriodicY.Checked
         canvas.FillSymbols = chkFillSymbols.Checked
         canvas.ShowOuterEdges = chkOuter.Checked
@@ -4941,8 +4988,9 @@ Public Class HelpForm
         Item(rtb, "Vertex Mode", "inner-curve corners: Sharp corner, Arc fillet or Spline curve")
         Item(rtb, "Vertex Size", "amount of corner trimming")
         Item(rtb, "Inner Offset", "inset of the inner curve from the cell borders")
+        Item(rtb, "Domain Color", "background of the profile/rectangle: Theme follows the active theme, or pick a named dark (or paper) tone from the extended palette")
         Item(rtb, "Curve Width", "stroke width (canvas, exports and block previews)")
-        Item(rtb, "Domain fill", "fill the sketch profile or the starting rectangle with the canvas color; the background around it always follows the theme")
+        Item(rtb, "Domain fill", "fill the sketch profile or the starting rectangle with the Domain Color (STYLE section); the background around it always follows the theme")
         Item(rtb, "Fill cells", "translucent background of each cell")
         Item(rtb, "Fill symbols", "even-odd fill of symbols/blocks: nested profiles become holes")
         Item(rtb, "Random symbol rotation", "stable random rotation per cell")
