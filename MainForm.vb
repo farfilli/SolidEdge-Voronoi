@@ -3001,7 +3001,62 @@ Public Class MainForm
         End If
     End Sub
 
+    ' Verifica che Solid Edge sia pronto a ricevere: avviato, con un documento
+    ' aperto e uno sketch attivo. Restituisce un messaggio chiaro in caso contrario.
+    Private Function CheckSolidEdgeReady(ByRef errorMessage As String) As Boolean
+        errorMessage = Nothing
+        Dim app As Object = Nothing
+        Dim doc As Object = Nothing
+
+        Try
+            Try
+                app = System.Runtime.InteropServices.Marshal.GetActiveObject("SolidEdge.Application")
+            Catch
+                errorMessage = "Solid Edge is not running." & Environment.NewLine &
+                               "Start Solid Edge, open a part and activate a sketch, then try again."
+                Return False
+            End Try
+
+            Try
+                doc = app.ActiveDocument
+            Catch
+                doc = Nothing
+            End Try
+
+            If doc Is Nothing Then
+                errorMessage = "Solid Edge is running but no document is open." & Environment.NewLine &
+                               "Open a part and activate a sketch."
+                Return False
+            End If
+
+            Dim sk As Object = Nothing
+            Try
+                sk = doc.ActiveSketch
+            Catch
+                sk = Nothing
+            End Try
+
+            If sk Is Nothing Then
+                errorMessage = "No active sketch in the current Solid Edge document." & Environment.NewLine &
+                               "Enter sketch editing and try again."
+                Return False
+            End If
+
+            Return True
+
+        Finally
+            doc = Nothing
+            app = Nothing
+        End Try
+    End Function
+
     Private Sub ExportToSolidEdge_Click(sender As Object, e As EventArgs)
+        Dim seErr As String = Nothing
+        If Not CheckSolidEdgeReady(seErr) Then
+            MessageBox.Show(seErr, "Solid Edge", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            Return
+        End If
+
         Try
             If chkExportAsBlocks.Checked Then
                 Dim geoms = ExportGeometry.BuildCellGeometry(canvas)
